@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject><IsPackable>false</IsPackable></PropertyGroup><ItemGroup>
+  <ProjectReference Include="../../src/Aict.Core/Aict.Core.csproj" />
+  <ProjectReference Include="../../src/Aict.Storage/Aict.Storage.csproj" />
+  <ProjectReference Include="../../src/Aict.Backend/Aict.Backend.csproj" />
+  <ProjectReference Include="../../src/Aict.Enforcement/Aict.Enforcement.csproj" />
+  <ProjectReference Include="../../src/Aict.Beta.Core/Aict.Beta.Core.csproj" />
+  <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+  <PackageReference Include="MSTest.TestAdapter" Version="4.5.2" />
+  <PackageReference Include="MSTest.TestFramework" Version="4.5.2" />
+</ItemGroup></Project>

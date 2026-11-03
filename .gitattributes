@@ -1,0 +1,2 @@
+# Preserve exact bytes, including PowerShell UTF-8 BOM and pinned fixture hashes.
+* -text

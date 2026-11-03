@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType></PropertyGroup><ItemGroup>
+  <ProjectReference Include="../Aict.Contracts/Aict.Contracts.csproj" />
+  <ProjectReference Include="../Aict.Storage/Aict.Storage.csproj" />
+  <ProjectReference Include="../Aict.Enforcement/Aict.Enforcement.csproj" />
+</ItemGroup></Project>

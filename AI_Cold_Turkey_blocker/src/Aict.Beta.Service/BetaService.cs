@@ -1,0 +1,63 @@
+using System.Collections.Immutable;
+using System.IO.Pipes;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.ServiceProcess;
+using System.Diagnostics;
+using Aict.Contracts;
+using Aict.Core;
+using Aict.Storage;
+namespace Aict.Beta.Service;
+internal sealed class BetaService:ServiceBase {
+    readonly CancellationTokenSource stop=new();Task? worker;
+    readonly System.Threading.Channels.Channel<ActivityFrame> activityQueue=System.Threading.Channels.Channel.CreateBounded<ActivityFrame>(256);
+    ActivityRepository? activities;
+    public BetaService(){ServiceName=Env.Name;AutoLog=false;CanStop=true;CanShutdown=true;}
+    protected override void OnStart(string[] args)=>worker=Task.Run(Run);
+    protected override void OnStop(){stop.Cancel();if(worker is not null && !worker.Wait(TimeSpan.FromSeconds(50)))throw new System.TimeoutException("Service stop did not finish");}
+    protected override void OnShutdown()=>OnStop();
+    async Task Run() {
+        Task? pipe=null,appWorker=null,activityWorker=null;Browsers? browsers=null;Authority? authority=null;bool requiredAtStop=false;
+        try{
+            var env=PolicyJson.Parse<NativeEnvironment>(await Env.Native("--environment",stop.Token));var clock=new SystemClock(env.BootId);string database=Path.Combine(Env.Root,"state","engine.sqlite"),marker=Path.Combine(Env.Root,"state","initialized.marker");
+            StateRepository repository;if(File.Exists(database))repository=StateRepository.OpenExisting(database);else{if(File.Exists(marker))throw new InvalidDataException("Initialized state missing; refusing reset");repository=StateRepository.CreateNew(database,Authority.Initial(clock));using var m=new FileStream(marker,FileMode.CreateNew,FileAccess.Write,FileShare.Read);m.Flush(true);}
+            activities=new ActivityRepository(database);activityWorker=RunActivities();authority=new Authority(repository,clock,env.ProtectedIdentities,Env.Log,frame=>{if(!activityQueue.Writer.TryWrite(frame))Env.Log("ActivityQueueGap",new{seconds=frame.Slice.Duration.TotalSeconds});},Env.Config.HostTrialEndsUtc);using var events=new BlockEvents();pipe=RunPipe(authority);var terminator=new Terminator(Env.Config.ProbeSid,env.ProtectedIdentities);var browserTerminator=new Terminator(Env.Config.ProbeSid,env.ProtectedIdentities);appWorker=RunApps(authority,terminator);browsers=new Browsers();
+            Directory.CreateDirectory(Path.Combine(Env.Root,"state","events"));foreach(string file in Directory.EnumerateFiles(Path.Combine(Env.Root,"state","events"),"*.jsonl").Where(f=>File.GetLastWriteTimeUtc(f)<DateTime.UtcNow.AddDays(-90)))File.Delete(file);
+            string? lastState=null;long configureAt=-10000,agentRestartAt=-10000;string? configureFault=null;
+            while(!stop.IsCancellationRequested){
+                var desired=await authority.Desired(stop.Token);
+                if(clock.Uptime-configureAt>5000){try{browsers.Configure(desired.Web.Required);configureFault=null;}catch(Exception e){configureFault=e.Message;}configureAt=clock.Uptime;}
+                requiredAtStop=desired.Web.Required;string? appError=null,webError=configureFault;bool closed=false,networkConfirmed=false;
+                var observed=appOutcome;appError=observed?.Error??(observed is null?"等待应用策略执行确认":clock.Uptime-observed.Tick>5000?"应用策略确认超时，现有限制保留并继续重试":null);
+                try{closed=browsers.Reconcile(desired.Web,desired.BrowserHealthy);networkConfirmed=true;await browsers.CloseLostBrowsers(desired.Web,desired.BrowserHealthy,browserTerminator,stop.Token);if(desired.Web.Required && configureFault is not null)webError=configureFault;}catch(Exception e){webError=e.Message;}
+                await authority.Observe(observed?.Plan??desired.Apps,appError,desired.Web.Fingerprint,closed,webError,stop.Token,networkConfirmed);var response=await authority.Handle(new(),ct:stop.Token);Env.Save(Path.Combine(Env.Root,"state","status.json"),response);
+                if(response.Status?.TelemetryConnected!=true && clock.Uptime-agentRestartAt>10000){agentRestartAt=clock.Uptime;try{RestartAgent();}catch(Exception e){Env.Log("AgentRestartFault",new{error=e.Message});}}
+                string signature=PolicyJson.Serialize(new{appError,closed,webError,agent=response.Status?.TelemetryConnected,profiles=response.Status?.Websites.ConnectedProfiles});if(signature!=lastState){Env.Log("ExecutionState",new{appError,closed,webError,agent=response.Status?.TelemetryConnected});lastState=signature;}
+                if(desired.Uninstall && clock.UserSessionPresent){RunMaintenance(false);return;}if(appWorker.IsFaulted)throw new InvalidOperationException("Application worker failed",appWorker.Exception);if(pipe.IsFaulted)throw new InvalidOperationException("Authorized pipe failed",pipe.Exception);await Task.Delay(500,stop.Token);
+            }
+        }catch(OperationCanceledException)when(stop.IsCancellationRequested){}
+        catch(Exception e){try{Env.Save(Path.Combine(Env.Root,"state","service-fault.json"),new{error=e.ToString(),existingRestrictionsRetained=true});}catch{ }Environment.Exit(1);}
+        finally{stop.Cancel();if(requiredAtStop && browsers is not null)try{browsers.Reconcile(new([],true),ImmutableDictionary<string,bool>.Empty);}catch(Exception e){try{Env.Log("ShutdownNetworkGateFault",new{error=e.Message});}catch{}}if(appWorker is not null)try{await appWorker;}catch(OperationCanceledException){}if(pipe is not null)try{await pipe;}catch(OperationCanceledException){}if(activityWorker is not null)try{await activityWorker;}catch(OperationCanceledException){}browsers?.Dispose();authority?.Dispose();}
+    }
+    async Task RunActivities(){try{while(!stop.IsCancellationRequested){await Task.Delay(2000,stop.Token);Flush();}}catch(OperationCanceledException)when(stop.IsCancellationRequested){}finally{Flush();}void Flush(){var batch=new List<ActivityFrame>();while(activityQueue.Reader.TryRead(out var frame))batch.Add(frame);if(batch.Count==0)return;try{activities!.Add(batch);}catch(Exception e){Env.Log("ActivityStorageGap",new{error=e.Message,frames=batch.Count});}}}
+    sealed record AppOutcome(AppPlan Plan,string? Error,long Tick);
+    volatile AppOutcome? appOutcome;
+    static void RestartAgent(){dynamic scheduler=Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;try{scheduler.Connect();dynamic task=scheduler.GetFolder("\\").GetTask("AICT-Beta-Agent-"+Env.Config.RunId);if(task.Definition.Actions.Count!=1 || !string.Equals(Convert.ToString(task.Definition.Actions.Item(1).Path),Path.Combine(Env.Root,@"Agent\Aict.Beta.Agent.exe"),StringComparison.OrdinalIgnoreCase) || Convert.ToString(task.Definition.Actions.Item(1).Arguments)!="--session-agent" || task.Definition.Principal.RunLevel!=0)throw new InvalidDataException("Agent task changed");if(task.State!=4)task.Run(null);}finally{Marshal.FinalReleaseComObject(scheduler);}}
+    async Task RunApps(Authority authority,Terminator terminator){
+        while(!stop.IsCancellationRequested){var desired=await authority.Desired(stop.Token);string? error=null;
+            try{Env.Save(Path.Combine(Env.Root,"state","desired-plan.json"),new {runId=Env.Config.RunId,planJson=PolicyJson.Serialize(desired.Apps)});var actual=PolicyJson.Parse<NativeObservation>(await Env.Native("--policy-block",stop.Token));if(actual.RunId!=Env.Config.RunId || actual.Fingerprint!=desired.Apps.Fingerprint || actual.AllowGroups!=desired.Apps.Whitelists.Length || !actual.DeniedIdentities.SequenceEqual(desired.Apps.Denied.Select(a=>a.Id)))throw new InvalidDataException("AppLocker readback does not match desired state");await terminator.EnforceAsync(desired.Apps,stop.Token);}catch(Exception e)when(e is not OperationCanceledException){error=e.Message;}
+            appOutcome=new(desired.Apps,error,Environment.TickCount64);await Task.Delay(500,stop.Token);
+        }
+    }
+    internal static void RunMaintenance(bool force){dynamic scheduler=Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service")!)!;try{scheduler.Connect();dynamic task=scheduler.GetFolder("\\").GetTask("AICT-Beta-"+(force?"Recovery-":"Uninstall-")+Env.Config.RunId);string exe=Convert.ToString(task.Definition.Actions.Item(1).Path),args=Convert.ToString(task.Definition.Actions.Item(1).Arguments);if(task.Definition.Actions.Count!=1 || !exe.Equals(Path.Combine(Env.Root,@"Service\Aict.Beta.Service.exe"),StringComparison.OrdinalIgnoreCase) || args!=(force?"--beta-cleanup-force":"--beta-cleanup") || Convert.ToString(task.Definition.Principal.UserId) is not ("SYSTEM" or "S-1-5-18" or "NT AUTHORITY\\SYSTEM"))throw new InvalidDataException("Maintenance task changed");task.Run(null);}finally{Marshal.FinalReleaseComObject(scheduler);}}
+    [DllImport("kernel32.dll",SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] static extern bool GetNamedPipeClientProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipe,out uint pid);
+    static bool IsAgent(NamedPipeServerStream pipe){if(!GetNamedPipeClientProcessId(pipe.SafePipeHandle,out uint pid))return false;try{using var p=Process.GetProcessById((int)pid);return string.Equals(p.MainModule?.FileName,Path.Combine(Env.Root,@"Agent\Aict.Beta.Agent.exe"),StringComparison.OrdinalIgnoreCase);}catch(Exception e)when(e is InvalidOperationException or System.ComponentModel.Win32Exception or ArgumentException){return false;}}
+    static PipeSecurity Security(){var s=new PipeSecurity();s.SetAccessRuleProtection(true,false);s.SetOwner(new SecurityIdentifier("S-1-5-18"));s.AddAccessRule(new PipeAccessRule(new SecurityIdentifier("S-1-5-2"),PipeAccessRights.FullControl,AccessControlType.Deny));s.AddAccessRule(new PipeAccessRule(new SecurityIdentifier("S-1-5-18"),PipeAccessRights.FullControl,AccessControlType.Allow));s.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(Env.Config.ProbeSid),PipeAccessRights.ReadWrite,AccessControlType.Allow));return s;}
+    async Task RunPipe(Authority authority){var clients=new List<Task>();NamedPipeServerStream? waiting=null;NamedPipeServerStream Create(bool first)=>NamedPipeServerStreamAcl.Create(Env.Pipe,PipeDirection.InOut,9,PipeTransmissionMode.Byte,PipeOptions.Asynchronous|(first?PipeOptions.FirstPipeInstance:PipeOptions.None),8192,8192,Security());
+        try{waiting=Create(true);while(!stop.IsCancellationRequested){clients.RemoveAll(t=>t.IsCompleted);if(clients.Count>=8){await Task.WhenAny(clients);continue;}await waiting.WaitForConnectionAsync(stop.Token);var current=waiting;waiting=Create(false);clients.Add(Serve(current));}}catch(OperationCanceledException)when(stop.IsCancellationRequested){}finally{waiting?.Dispose();await Task.WhenAll(clients);}
+        async Task Serve(NamedPipeServerStream connected){using(connected)using(var timeout=CancellationTokenSource.CreateLinkedTokenSource(stop.Token)){timeout.CancelAfter(6000);try{string json=await PipeFrames.ReadAsync(connected,PipeFrames.MaxRequestBytes,timeout.Token);string? sid=null;connected.RunAsClient(()=>{using var user=WindowsIdentity.GetCurrent();sid=user.User?.Value;});Response response;if(sid!=Env.Config.ProbeSid)response=new(false,"UNAUTHORIZED","此后台只管理指定用户。");else{try{var request=PolicyJson.Parse<Request>(json);request.Validate();if(request.Command is Command.GetActivities or Command.ExportActivityCsv){var data=activities!.Read();response=request.Command==Command.GetActivities?new(true,"OK","统计约两秒更新；缺口单独记录。",Activities:data):new(true,"OK","应用与网站是不同维度，不能相加当作总时长。",ExportText:ActivityRepository.ToCsv(data));}else response=await authority.Handle(request,IsAgent(connected),timeout.Token);}catch(Exception e)when(e is ArgumentException or System.Text.Json.JsonException or InvalidDataException){response=new(false,"INVALID_REQUEST","请求格式不正确。");}}await PipeFrames.WriteAsync(connected,PolicyJson.Serialize(response),PipeFrames.MaxResponseBytes,timeout.Token);}catch(Exception e)when(e is IOException or UnauthorizedAccessException or OperationCanceledException or System.Text.DecoderFallbackException){}}}
+    }
+    sealed record NativeEnvironment(string RunId,string BootId,ImmutableArray<string> ProtectedIdentities);
+    sealed record NativeObservation(string RunId,bool ExePresent,bool CompanionPresent,ImmutableArray<string> DeniedIdentities,string Fingerprint,int AllowGroups);
+}

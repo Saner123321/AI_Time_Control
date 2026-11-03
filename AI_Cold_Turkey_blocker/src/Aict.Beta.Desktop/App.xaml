@@ -1,0 +1,11 @@
+<Application x:Class="Aict.Beta.Desktop.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="Ink" Color="#1D2D40"/><SolidColorBrush x:Key="Muted" Color="#61748A"/>
+    <Style TargetType="Window"><Setter Property="FontFamily" Value="Microsoft YaHei UI"/><Setter Property="FontSize" Value="13"/><Setter Property="Foreground" Value="{StaticResource Ink}"/></Style>
+    <Style TargetType="Button"><Setter Property="Padding" Value="14,8"/><Setter Property="Margin" Value="0,4,8,4"/><Setter Property="Background" Value="#EDF2F7"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/></Style>
+    <Style TargetType="TextBox"><Setter Property="Padding" Value="8,6"/><Setter Property="Margin" Value="0,4,0,10"/><Setter Property="BorderBrush" Value="#CCD6E1"/></Style>
+    <Style TargetType="ComboBox"><Setter Property="Padding" Value="8,6"/><Setter Property="Margin" Value="0,4,0,10"/></Style>
+    <Style TargetType="CheckBox"><Setter Property="Margin" Value="0,6,14,6"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
+    <Style x:Key="Section" TargetType="TextBlock"><Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,22,0,10"/></Style>
+  </Application.Resources>
+</Application>

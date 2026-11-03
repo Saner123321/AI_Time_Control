@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0-windows7.0": {
+      "aict.contracts": {
+        "type": "Project",
+        "dependencies": {
+          "Aict.Core": "[1.0.0, )"
+        }
+      },
+      "aict.core": {
+        "type": "Project"
+      }
+    },
+    "net10.0-windows7.0/win-x64": {}
+  }
+}
