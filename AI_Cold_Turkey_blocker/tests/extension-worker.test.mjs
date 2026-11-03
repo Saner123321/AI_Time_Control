@@ -12,9 +12,9 @@ test('actual worker clears previous blocks, confirms readback, and never acknowl
     await import('../browser-extension/beta/worker.js?release-test');await new Promise(resolve=>setImmediate(resolve));
     await listener({ok:true,browserPlan:{fingerprint:'empty',required:false,groups:[{mode:'BlockSelected',domains:[],exceptions:[]}]}});
     assert.deepEqual(installed,[]);await pulse();assert.equal(messages.at(-1).appliedPlan,'empty');
-    let status;statusListener({type:'block-status',domain:'example.com'},{},r=>status=r);assert.deepEqual(status,{known:true,blocked:false});
+    let status;statusListener({type:'block-status',domain:'example.com'},{url:'chrome-extension://test/blocked.html'},r=>status=r);assert.deepEqual(status,{known:true,blocked:false,reasons:[]});
     await listener({ok:true,browserPlan:{fingerprint:'all',required:true,groups:[{mode:'AllowSelected',domains:[],exceptions:[]}]}});
-    assert.equal(installed.length,1);await pulse();assert.equal(messages.at(-1).appliedPlan,'all');
+    assert.equal(installed.length,2);await pulse();assert.equal(messages.at(-1).appliedPlan,'all');
     await listener({ok:true,browserPlan:{fingerprint:'pages',required:true,groups:[{mode:'BlockSelected',domains:['*example*'],exceptions:['example.com/allowed']}]}});
     assert.equal(installed[0].action.type,'redirect');
     const gate=(url,tab=1)=>new Promise(resolve=>assert.equal(statusListener({type:'gate',url},{url:'chrome-extension://test/gate.html#'+url,tab:{id:tab}},resolve),true));
@@ -29,6 +29,6 @@ test('actual worker clears previous blocks, confirms readback, and never acknowl
     assert.equal(statusListener({type:'gate',url:'https://example.com/'},{url:'https://evil.test/',tab:{id:1}},()=>{}),false);
     fail=true;const originalError=console.error;console.error=()=>{};try{await listener({ok:true,browserPlan:{fingerprint:'failed',required:false,groups:[]}});}finally{console.error=originalError;}
     await pulse();assert.equal(messages.at(-1).appliedPlan,'');assert.equal(installed.length,1);
-    statusListener({type:'block-status',domain:'example.com'},{},r=>status=r);assert.equal(status.known,false);
+    statusListener({type:'block-status',domain:'example.com'},{url:'chrome-extension://test/blocked.html'},r=>status=r);assert.equal(status.known,false);
   }finally{globalThis.chrome=saved.chrome;globalThis.setInterval=saved.setInterval;globalThis.setTimeout=saved.setTimeout;}
 });

@@ -20,16 +20,21 @@ try{
   let worker;for(let i=0;i<40;i++){const t=await cdp('Target.getTargets');worker=t.targetInfos.find(t=>t.type==='service_worker' && t.url.includes('/test-worker.js'));if(worker)break;await sleep(250);}if(!worker)throw Error('Isolated Edge did not load test extension');
   const ws=(await cdp('Target.attachToTarget',{targetId:worker.targetId,flatten:true})).sessionId;
   const run=async(expression,session=ws)=>(await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},session));
+  let ready=false;for(let i=0;i<40;i++){ready=(await run('typeof globalThis.__listeners?.[0]==="function"')).result?.value===true;if(ready)break;await sleep(50);}if(!ready)throw Error('Test native bridge listener did not initialize');
   async function plan(groups,key){const p={groups,fingerprint:key,required:groups.length>0};const r=await run(`(async()=>{globalThis.__plan=${JSON.stringify(p)};await __listeners[0]({ok:true,browserPlan:__plan});return await chrome.declarativeNetRequest.getDynamicRules();})()`);if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));}
   const page=(await cdp('Target.createTarget',{url:'about:blank'})).targetId,ps=(await cdp('Target.attachToTarget',{targetId:page,flatten:true})).sessionId;
+  await cdp('Emulation.setDeviceMetricsOverride',{width:1100,height:850,deviceScaleFactor:1,mobile:false},ps);
   async function nav(path,expectAllowed){requests=[];await cdp('Page.navigate',{url:base+path},ps);let href='',confirmed=false;for(let i=0;i<40;i++){await sleep(150);const r=await run('({href:location.href,text:document.body?.innerText})',ps);href=r.result?.value?.href||'';confirmed=expectAllowed?href===base+path:r.result?.value?.text?.includes('当前页面受到专注计划保护');if(confirmed)break;}
     const seen=requests.includes(path);if(!confirmed || (expectAllowed?!seen:seen)){result.page=await run('document.body.innerText',ps);result.debug=await run('(async()=>({errors:globalThis.__errors,dynamic:await chrome.declarativeNetRequest.getDynamicRules(),pulse:globalThis.__lastPulse,session:await chrome.declarativeNetRequest.getSessionRules(),plan:globalThis.__plan}))()');throw Error('Request assertion failed '+path+' href='+href+' requests='+requests);}result.cases.push({path,expectAllowed,serverReached:seen,href});}
-  const group={id:'1',mode:'BlockSelected',domains:['*127.0.0.1*'],exceptions:['127.0.0.1:'+server.address().port+'/allowed','*favlist*'],reasons:['Always']};
-  await plan([group],'a');await nav('/blocked',false);await nav('/allowed?tracking=one',true);await nav('/other',false);await nav('/favlist',true);
+  const group={id:'1',name:'测试专注规则',mode:'BlockSelected',domains:['*127.0.0.1*'],exceptions:['127.0.0.1:'+server.address().port+'/allowed','*favlist*'],reasons:['QuotaExhausted'],details:['上午 09:00—12:00 的20分钟额度已用完。']};
+  await plan([group],'a');await nav('/blocked',false);const reasonText=(await run('document.body.innerText',ps)).result.value;if(!reasonText.includes('命中规则：测试专注规则')||!reasonText.includes('20分钟额度已用完'))throw Error('Specific block reason was not displayed');
+  const shot=await cdp('Page.captureScreenshot',{format:'png'},ps);await writeFile(join(out,'block-reasons.png'),Buffer.from(shot.data,'base64'));
+  await nav('/allowed?tracking=one',true);await nav('/other',false);await nav('/favlist',true);
   await nav('/allowed',true);await run("history.pushState({},'', '/blocked-spa')",ps);await sleep(650);const spa=(await run('location.href',ps)).result.value;if(!spa.includes('/blocked.html#') && !spa.includes('/gate.html#'))throw Error('SPA URL change was not blocked');result.cases.push({spa:true,blocked:true});
   await plan([group,{...group,id:'2',domains:['*favlist*'],exceptions:[]}],'b');await nav('/favlist',false);
   await plan([{...group,exceptions:[]}],'c');await nav('/allowed?tracking=one',false);
   await plan([],'d');await nav('/allowed?tracking=one',true);await nav('/blocked',true);
+  await plan([{...group,name:'整站时段规则',domains:['127.0.0.1'],exceptions:[],reasons:['WeeklySchedule'],details:['处于每周硬封锁时段：09:00—12:00。']}],'e');await nav('/domain-only',false);const domainReason=(await run('document.body.innerText',ps)).result.value;if(!domainReason.includes('整站时段规则')||!domainReason.includes('每周硬封锁时段'))throw Error('Domain rule reason was not displayed');await plan([],'f');await nav('/domain-only',true);
   result.passed=true;result.browser=await cdp('Browser.getVersion');
 }catch(e){result.error=e.stack;}finally{await writeFile(join(out,'result.json'),JSON.stringify(result,null,2));await writeFile(join(out,'browser-stderr.txt'),stderr);try{await cdp('Browser.close');}catch{}browser.kill();server.close();}
 console.log(JSON.stringify(result,null,2));if(!result.passed)process.exitCode=1;

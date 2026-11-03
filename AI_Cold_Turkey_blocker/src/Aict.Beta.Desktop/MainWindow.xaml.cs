@@ -103,6 +103,7 @@ public partial class MainWindow : Window {
         if(status.Fault is {} fault) Feedback.Text=fault;
         if(status.UninstallReady) {SubmitButton.IsEnabled=false;Feedback.Text="卸载已获准，后台正在撤销本软件的限制，规则与日志将保留。";}
         if(draftToken is not null && draftToken!=status.EditToken) DraftState.Text="后台配置已变化；请重新读取后提交";
+        ShowReasonSummary();
     }
     string Local(DateTimeOffset value) => TimeZoneInfo.ConvertTime(value,PolicyValidation.Zone(latest?.Policy ?? new())).ToString("MM-dd HH:mm");
     PolicyConfiguration VisiblePolicy()=>editingPending && latest?.Pending is {} p?PolicyJson.Parse<PolicyConfiguration>(p.TargetJson):latest!.Policy;
@@ -137,7 +138,10 @@ public partial class MainWindow : Window {
         TimeZone.SelectedIndex=draftBase.TimeZoneId=="UTC"?1:0;TimedEnabled.IsChecked=group.BlockUntilUtc is not null;TimedMinutes.Text=(group.BlockUntilUtc is {} until?Math.Max(1,(until-latest.EffectiveUtc).TotalMinutes):25).ToString("0.##",CultureInfo.InvariantCulture);Editor.IsEnabled=true;DraftState.Text=editingPending?"正在编辑待生效规则 · 重新提交会重新计时":"正在编辑当前规则 · 草稿尚未提交";
         originalTimedText=TimedMinutes.Text;
         Feedback.Text=editingPending?"这里显示已保存的待生效规则。再次修改后提交，按当前生效规则的等待时间重新计时。":"选择应用或填写网站。收紧立即生效；放宽才等待，到期自动切换。";
+        ShowReasonSummary();
     }
+    void ShowReasonSummary(){var active=(latest?.ActiveBlocks??[]).FirstOrDefault(r=>r.GroupId==editing?.Id);CurrentReasonText.Text=active is null?"此规则当前没有触发封锁；其他规则仍可能限制访问。":"此规则当前封锁原因："+string.Join("；",active.Details.Take(2))+(active.Details.Length>2?$"（另有 {active.Details.Length-2} 项，点击查看全部）":"");}
+    void ShowBlockReasons(object sender,RoutedEventArgs e){var window=new Window{Owner=this,Title="当前封锁原因"};var panel=Ui.Layout(window,"当前已生效规则的封锁原因");Ui.Text(panel,"任一命中条件仍生效时会继续封锁。下面按规则列出触发条件；具体网站的例外匹配结果以该网站封锁页为准。");var active=latest?.ActiveBlocks??[];if(active.IsEmpty)Ui.Text(panel,"目前没有规则触发封锁。如果仍无法访问，请检查浏览器组件连接或执行异常状态。");foreach(var rule in active){Ui.Text(panel,"规则："+rule.RuleName);foreach(string line in rule.Details)Ui.Text(panel,"• "+line);}window.ShowDialog();}
     AppEntry Entry(string id) => new(id,appNames.GetValueOrDefault(id) ?? "已选应用 · 文件身份 "+id[^Math.Min(id.Length,8)..]);
     void NewRule(object sender,RoutedEventArgs e) => StartDraft(NewGroup());
     void SelectRule(object sender,SelectionChangedEventArgs e) {if(!loading && Rules.SelectedItem is RuleEntry row) StartDraft(row.Rule);}

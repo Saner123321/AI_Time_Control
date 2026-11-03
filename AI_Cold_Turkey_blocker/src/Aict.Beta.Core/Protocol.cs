@@ -38,13 +38,14 @@ public sealed record Execution(string Desired,string? Verified,ImmutableArray<st
     public bool Confirmed=>Fault is null && Desired==Verified;
 }
 public sealed record WebExecution(bool Required,int ConnectedProfiles,bool ForegroundAgentHealthy,string? PublishedPlan,bool FirewallClosed,string? Fault,bool GateConfirmed=true);
-public sealed record Status(PolicyConfiguration Policy,PendingChange? Pending,string EditToken,DateTimeOffset EffectiveUtc,bool ClockConsistent,string? ClockAnomaly,bool StorageHealthy,string? Fault,ImmutableArray<ApplicationTarget> Applications,ImmutableArray<UsageRow> Usage,Execution Execution,WebExecution Websites,bool UninstallReady,DateTimeOffset? TrialEndsUtc=null,bool TrialExpired=false) {
+public sealed record RuleActivation(Guid GroupId,string RuleName,ImmutableArray<string> Details);
+public sealed record Status(PolicyConfiguration Policy,PendingChange? Pending,string EditToken,DateTimeOffset EffectiveUtc,bool ClockConsistent,string? ClockAnomaly,bool StorageHealthy,string? Fault,ImmutableArray<ApplicationTarget> Applications,ImmutableArray<UsageRow> Usage,Execution Execution,WebExecution Websites,bool UninstallReady,DateTimeOffset? TrialEndsUtc=null,bool TrialExpired=false,ImmutableArray<RuleActivation>? ActiveBlocks=null) {
     public bool TelemetryConnected=>Websites.ForegroundAgentHealthy;
     public string Mode=>BuildMode.HostTrial?"HOST_TRIAL":"VM_INTEGRATED_BETA";
-    public string Revision=>"multi-quota-v7";
+    public string Revision=>"block-reasons-v8";
     public bool SystemEnforcementActive=>Execution.Confirmed && (!Execution.Denied.IsEmpty || Execution.AllowGroups>0);
 }
-public sealed record WebGroup(Guid Id,TargetMode Mode,ImmutableArray<string> Domains,ImmutableArray<string> Exceptions,ImmutableArray<BlockReason> Reasons);
+public sealed record WebGroup(Guid Id,TargetMode Mode,ImmutableArray<string> Domains,ImmutableArray<string> Exceptions,ImmutableArray<BlockReason> Reasons,string Name="",ImmutableArray<string>? Details=null);
 public sealed record WebPlan(ImmutableArray<WebGroup> Groups,bool Required) {
     public string Fingerprint=>PolicyJson.Sha256(PolicyJson.Serialize(Groups));
 }
@@ -54,7 +55,7 @@ public sealed record AppPlan(ImmutableArray<ApplicationTarget> Denied,ImmutableA
 }
 public static class Plans {
     public static bool HasWebsiteScope(RuleGroup g)=>g.Enabled && (g.WebsiteMode==TargetMode.AllowSelected || g.WebsiteMode==TargetMode.BlockSelected && !g.WebsiteDomains.IsEmpty);
-    public static WebPlan Web(EngineSnapshot s,bool telemetry) => new(s.Policy.Groups.Where(g=>HasWebsiteScope(g) && !RuleEngine.ActivationReasons(s.Policy,g,s.Usage,s.Clock.Reading,telemetry).IsEmpty).Select(g=>new WebGroup(g.Id,g.WebsiteMode,g.WebsiteDomains.Select(WebsitePattern.Normalize).ToImmutableArray(),g.WebsiteExceptions.Select(WebsitePattern.Normalize).ToImmutableArray(),RuleEngine.ActivationReasons(s.Policy,g,s.Usage,s.Clock.Reading,telemetry))).ToImmutableArray(),s.Policy.Groups.Any(HasWebsiteScope));
+    public static WebPlan Web(EngineSnapshot s,bool telemetry) => new(s.Policy.Groups.Where(g=>HasWebsiteScope(g) && !RuleEngine.ActivationReasons(s.Policy,g,s.Usage,s.Clock.Reading,telemetry).IsEmpty).Select(g=>new WebGroup(g.Id,g.WebsiteMode,g.WebsiteDomains.Select(WebsitePattern.Normalize).ToImmutableArray(),g.WebsiteExceptions.Select(WebsitePattern.Normalize).ToImmutableArray(),RuleEngine.ActivationReasons(s.Policy,g,s.Usage,s.Clock.Reading,telemetry),g.Name,BlockExplanations.Describe(s.Policy,g,s.Usage,s.Clock.Reading,telemetry))).ToImmutableArray(),s.Policy.Groups.Any(HasWebsiteScope));
     public static AppPlan Apps(EngineSnapshot s,bool telemetry) {
         var active=s.Policy.Groups.Where(g=>g.Enabled && !RuleEngine.ActivationReasons(s.Policy,g,s.Usage,s.Clock.Reading,telemetry).IsEmpty).ToArray();
         var deny=active.Where(g=>g.ApplicationMode==TargetMode.BlockSelected).SelectMany(g=>g.ApplicationIds.Where(id=>!g.ApplicationExceptions.Contains(id))).Distinct().Order(StringComparer.Ordinal).Select(id=>s.Applications.Single(a=>a.Id==id)).ToImmutableArray();

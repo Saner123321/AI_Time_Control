@@ -1,4 +1,5 @@
 import {buildRules, denies, normalized} from './rules.js';
+import {blockingReasons} from './reasons.js';
 let port, pending=false, applied='', plan={groups:[],required:false}, profileId='', attemptedDomain=null, lastReadback=0;
 let operations=Promise.resolve(),nextGrant=10000;const grants=new Map();
 function serial(f){const run=operations.then(f);operations=run.catch(()=>{});return run;}
@@ -52,12 +53,12 @@ async function blockExistingTabs(){for(const tab of await chrome.tabs.query({}))
 chrome.tabs.onUpdated.addListener((id,change,tab)=>{if(change.url)void protect(tab);});
 chrome.action.onClicked.addListener(()=>chrome.tabs.create({url:chrome.runtime.getURL('blocked.html')}));
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
-  if(message?.type==='block-status' && typeof message.domain==='string'){reply({known:!!port && !!applied,blocked:denies(plan,message.domain)});return false;}
+  if(message?.type==='block-status' && typeof message.domain==='string' && sender.url?.split('#')[0]===chrome.runtime.getURL('blocked.html')){const known=!!port && !!applied;reply({known,blocked:denies(plan,message.domain),reasons:known?blockingReasons(plan,message.domain):[]});return false;}
   if(message?.type!=='gate' || typeof message.url!=='string' || sender.url?.split('#')[0]!==chrome.runtime.getURL('gate.html') || !Number.isInteger(sender.tab?.id))return false;
   serial(async()=>{
     const u=new URL(message.url);if(!['http:','https:'].includes(u.protocol)||u.username||u.password||u.href.length>8192)throw Error('网址格式无效');u.hash='';
     if(!port||!applied)return {known:false};
-    if(denies(plan,u.href)){attemptedDomain=u.hostname;return {known:true,blocked:true};}
+    if(denies(plan,u.href)){attemptedDomain=u.hostname;return {known:true,blocked:true,reasons:blockingReasons(plan,u.href)};}
     const key=sender.tab.id+'|'+u.href,existing=grants.get(key);if(existing)return {known:true,blocked:false,url:u.href};
     const remove=[];if(grants.size>=256){const [k,id]=grants.entries().next().value;grants.delete(k);remove.push(id);}
     const id=nextGrant++;const rule={id,priority:1000,action:{type:'allow'},condition:{tabIds:[sender.tab.id],regexFilter:'^'+u.href.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$',isUrlFilterCaseSensitive:true,resourceTypes:['main_frame','sub_frame']}};

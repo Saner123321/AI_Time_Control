@@ -15,6 +15,14 @@ export function matches(pattern,address) {
 }
 export function needsGate(plan) { return plan.groups.some(g=>[...g.domains,...g.exceptions].some(p=>!isDomain(p))); }
 export function buildRules(plan,gateUrl='') {
+  const scoped=plan.groups.filter(g=>g.mode==='AllowSelected'||g.mode==='BlockSelected'&&g.domains.length>0);
+  if(scoped.length===0)return [];
+  if(gateUrl && !gateUrl.startsWith('chrome-extension://'))throw Error('确认页必须来自本组件');
+  if(gateUrl && !needsGate(plan)) {
+    const navigation={id:1,priority:1,action:{type:'redirect',redirect:{regexSubstitution:gateUrl+'#\\1'}},condition:{regexFilter:'^(https?://.*)$',resourceTypes:['main_frame','sub_frame']}};
+    const resources=buildRules(plan).map((r,i)=>({...r,id:i+2,condition:{...r.condition,resourceTypes:r.condition.resourceTypes.filter(t=>t!=='main_frame'&&t!=='sub_frame')}}));
+    return [navigation,...resources];
+  }
   if(needsGate(plan)) {
     if(!gateUrl.startsWith('chrome-extension://'))throw Error('网址规则需要浏览器确认页');
     // Navigate through a local decision page BEFORE the request reaches the server.

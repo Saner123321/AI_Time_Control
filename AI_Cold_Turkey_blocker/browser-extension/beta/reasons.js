@@ -1,0 +1,4 @@
+import {denies} from './rules.js';
+const labels={Always:'已开启全天封锁。',WeeklySchedule:'当前处于每周硬封锁时段。',Cycle:'循环计划正处于封锁阶段。',TimedBlock:'倒计时封锁尚未结束。',QuotaExhausted:'当前时段的可用额度已用完。',UsageGap:'使用记录不完整，当前额度暂不可用。',ClockUntrusted:'系统时间尚未通过校验，当前限制保留。'};
+export function blockingReasons(plan,address){return plan.groups.filter(g=>denies({groups:[g]},address)).map(g=>({ruleName:g.name||'未命名规则',details:g.details?.length?g.details:(g.reasons||[]).map(r=>labels[r]||'当前规则要求封锁。')}));}
+export function renderReasons(element,entries){element.replaceChildren();for(const group of entries||[]){const section=document.createElement('section'),title=document.createElement('strong');title.textContent='命中规则：'+group.ruleName;section.append(title);const list=document.createElement('ul');for(const line of group.details||[]){const item=document.createElement('li');item.textContent=line;list.append(item);}section.append(list);element.append(section);}element.hidden=!entries?.length;}
