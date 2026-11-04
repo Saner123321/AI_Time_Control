@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "专注计划 · 浏览器保护",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "minimum_chrome_version": "120",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA30ZFUMlJ088SqLNWG7JZGso8fTsjNgfJU/iY+Fe9+E8lwR4t4MjyOW6FSSCINAx6KKWjLFSx6sA3ExwLk4IZjp0Ieoln30fIlmhjfS7v5fv72d1kqt9OzucWKTIDv4aGNH97aGSLx4Zslb+7PKhsWTfPUO7zmyAWMLji2Egw5rcf3xm91kr6Ru6sKr4hlxRd5+ahUb9N/kfiUieUP8pqq3h8GwmTxDPKbRQ9nSEJsLf/iJOGdXP2hrqvwDSBb5NPuGlnww8hN74OxiZgWPtQ7TdY3en0ipDIS9nTVVz2g5ygoWOFZXXvYC/aDznvSQEP0zgqwGYQETW7/62pHONW+QIDAQAB",
   "permissions": [

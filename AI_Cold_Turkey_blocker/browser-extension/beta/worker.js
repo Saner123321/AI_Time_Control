@@ -1,7 +1,13 @@
-import {buildRules, denies, normalized} from './rules.js';
+import {denies, normalized} from './rules.js';
 import {blockingReasons} from './reasons.js';
+import {navigationRules,FAST_ALLOW_ID} from './navigation.js';
 let port, pending=false, applied='', plan={groups:[],required:false}, profileId='', attemptedDomain=null, lastReadback=0;
-let operations=Promise.resolve(),nextGrant=10000;const grants=new Map();
+let operations=Promise.resolve(),nextGrant=1000000;const grants=new Map();
+async function checkedRules(next){
+  let expected=navigationRules(next,chrome.runtime.getURL('gate.html'));const supported=await Promise.all(expected.map(r=>chrome.declarativeNetRequest.isRegexSupported({regex:r.condition.regexFilter,isCaseSensitive:false,requireCapturing:r.action.type==='redirect'})));
+  if(expected.some((r,i)=>r.action.type==='redirect'&&!supported[i].isSupported)){expected=navigationRules(next,chrome.runtime.getURL('gate.html'),{universal:true});const checks=await Promise.all(expected.map(r=>chrome.declarativeNetRequest.isRegexSupported({regex:r.condition.regexFilter,isCaseSensitive:false,requireCapturing:r.action.type==='redirect'})));return expected.filter((r,i)=>{if(!checks[i].isSupported&&r.id<FAST_ALLOW_ID)throw Error('浏览器不支持当前封锁规则');return checks[i].isSupported;});}
+  return expected.filter((r,i)=>{if(!supported[i].isSupported&&r.id<FAST_ALLOW_ID)throw Error('浏览器不支持当前封锁规则');return supported[i].isSupported;});
+}
 function serial(f){const run=operations.then(f);operations=run.catch(()=>{});return run;}
 async function clearGrants(){const old=await chrome.declarativeNetRequest.getSessionRules();await chrome.declarativeNetRequest.updateSessionRules({removeRuleIds:old.map(r=>r.id)});grants.clear();}
 async function init(){
@@ -21,9 +27,9 @@ function connect(){
         if(!response.ok || !response.browserPlan)throw new Error(response.message || '后台没有返回计划');
         const next=response.browserPlan;
         if(next.fingerprint!==applied || Date.now()-lastReadback>5000){
-          const expected=buildRules(next,chrome.runtime.getURL('gate.html')),before=await chrome.declarativeNetRequest.getDynamicRules();
+          const expected=await checkedRules(next),before=await chrome.declarativeNetRequest.getDynamicRules();
           if(next.fingerprint!==applied)await clearGrants();
-          await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds:before.map(r=>r.id),addRules:expected});
+          if(normalized(before)!==normalized(expected))await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds:before.map(r=>r.id),addRules:expected});
           const actual=await chrome.declarativeNetRequest.getDynamicRules();
           if(normalized(actual)!==normalized(expected))throw new Error('声明式封锁规则读回不一致');
           plan=next;await blockExistingTabs();applied=next.fingerprint;lastReadback=Date.now();

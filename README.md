@@ -1,6 +1,6 @@
 # AI_Time_Control
 
-Windows 11 自用强制封锁软件，源码位于 [AI_Cold_Turkey_blocker](AI_Cold_Turkey_blocker)。当前实现到 **v8：封锁原因显示**，保留每个时段独立额度。
+Windows 11 自用强制封锁软件，源码位于 [AI_Cold_Turkey_blocker](AI_Cold_Turkey_blocker)。当前实现到 **v9：网页加载优化**，减少正常网站和例外页面的插件中转闪屏，保留封锁原因显示和每个时段独立额度。
 
 支持应用与网站封锁、每周计划、倒计时和循环、每日或分段额度、网址通配符、例外备注与分组、使用记录及导出。规则收紧可立即生效，放宽按已有等待时间生效；等待期间原规则继续运行。
 
