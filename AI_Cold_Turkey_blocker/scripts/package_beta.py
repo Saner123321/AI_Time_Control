@@ -15,15 +15,18 @@ def digest(path):
 def main():
     import argparse
     parser=argparse.ArgumentParser()
-    parser.add_argument('--host-trial',action='store_true')
-    host=parser.parse_args().host_trial
+    parser.add_argument('--host',action='store_true',help='Package the persistent host build; short trial is an optional installer choice')
+    parser.add_argument('--host-trial',action='store_true',help=argparse.SUPPRESS)
+    args=parser.parse_args()
+    if args.host_trial:parser.error('Use --host for the current release; choose optional short trial in the installation wizard')
+    host=args.host
     root = Path(__file__).resolve().parents[1]
     build = json.loads((root / ('lab/build/host-trial/last-build.json' if host else 'lab/build/beta/last-build.json')).read_text('utf-8-sig'))
     payload = Path(build['payloadDirectory']).resolve()
     payload.relative_to((root / ('lab/build/host-trial' if host else 'lab/build/beta')).resolve())
     ui = json.loads((payload / 'ui-self-test/result.json').read_text('utf-8-sig'))
     assert ui['passed'] and ui['systemWrites'] is False
-    output = root / ('dist/AICT-host-trial-v1.zip' if host else 'dist/AICT-self-use-beta-v1.zip')
+    output = root / ('dist/AICT-continuous-full-v10.zip' if host else 'dist/AICT-self-use-beta-v1.zip')
     sidecar = output.with_suffix('.zip.sha256')
     if output.exists() or sidecar.exists():
         raise FileExistsError('Frozen release exists; choose a new version')
@@ -36,7 +39,7 @@ def main():
                 files[path.relative_to(payload).as_posix()] = path
     for name in ('BetaBridge.exe', 'MovedTarget.exe', '专注计划.exe', '管理员恢复工具.exe'):
         files[name] = payload / name
-    files['README.md'] = root / ('docs/HOST_TRIAL.md' if host else 'docs/INTEGRATED_BETA.md')
+    files['README.md'] = root / ('docs/CONTINUOUS_USE_V10.md' if host else 'docs/INTEGRATED_BETA.md')
     files['集中测试清单.md'] = root / ('docs/HOST_TEST_CHECKLIST.md' if host else 'docs/BETA_TEST_CHECKLIST.md')
     for project in sorted((root / 'src').iterdir()):
         if not project.is_dir():
@@ -87,16 +90,16 @@ def main():
     key_hash = hashlib.sha256(base64.b64decode(extension['key'])).hexdigest()[:32]
     extension_id = ''.join(chr(ord('a') + int(x, 16)) for x in key_hash)
     assert extension_id == (payload / 'Extension/extension-id.txt').read_text().strip()
-    manifest = {'kind': 'AICT_INTEGRATED_BETA_V1', 'version': '0.1.0',
-                'created_utc': datetime.now(timezone.utc).isoformat(), 'vmware_only': not host, 'host_trial':host, 'trial_minutes':30 if host else None,
+    manifest = {'kind': 'AICT_INTEGRATED_BETA_V1', 'version': '0.7.0' if host else '0.1.0',
+                'created_utc': datetime.now(timezone.utc).isoformat(), 'vmware_only': not host, 'host_trial':False, 'continuous_use_default':host, 'optional_short_trial':host, 'trial_minutes':None,
                 'normal_entry': '专注计划.exe', 'requires_command_line': False,
-                'extension_id': extension_id, 'extension_deployment': 'UNPACKED_HOST_TRIAL' if host else 'UNPACKED_VM_TEST_ONLY',
+                'extension_id': extension_id, 'extension_deployment': 'UNPACKED_SELF_USE' if host else 'UNPACKED_VM_TEST_ONLY',
                 'windows_integration_acceptance': 'NOT_RUN',
                 'host_installation_authorized': host,
                 'target_sip_hash': target_hash, 'target_size': target_size,
                 'files': dict(sorted(hashes.items()))}
     if host:
-        contents['开始使用.txt']=('专注计划 · 主机短时测试\r\n\r\n直接双击本目录“专注计划.exe”，点击安装并完成管理员确认。\r\n安装后从桌面“专注计划（主机测试）”打开。初始为空规则，首次限30分钟，到期保留并停用规则。\r\n首次加载本机浏览器组件后再启用网站规则。无需虚拟机或命令行。\r\n误封使用单独的“管理员恢复工具.exe”；详细说明见 README.md。\r\n').encode('utf-8-sig')
+        contents['开始使用.txt']=('专注计划 · 持续使用\r\n\r\n双击“专注计划.exe”安装，之后使用桌面“专注计划”入口。初始为空规则，提交后按日程、额度和锁定条件持续执行，没有统一的30分钟截止时间。\r\n新安装可选择短测，但默认不勾选；已有安装修复保留原模式和数据库。\r\n首次连接浏览器组件后再启用网站规则。误封时使用“管理员恢复工具.exe”。详细说明见 README.md。\r\n').encode('utf-8-sig')
         hashes['开始使用.txt']=hashlib.sha256(contents['开始使用.txt']).hexdigest()
         manifest['files']['开始使用.txt']=hashes['开始使用.txt']
     contents['MANIFEST.json'] = (json.dumps(manifest, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
@@ -122,7 +125,7 @@ def main():
                'manifest_sha256': all_hashes['MANIFEST.json'],
                'windows_integration_acceptance': 'NOT_RUN'}
     if host:
-        extracted=root/'dist/AICT-host-trial-v1'
+        extracted=root/'dist/AICT-continuous-full-v10'
         if extracted.exists():raise FileExistsError('Host trial folder already exists')
         with zipfile.ZipFile(output) as archive:archive.extractall(extracted)
         assert all(digest(extracted/name)==expected for name,expected in all_hashes.items())

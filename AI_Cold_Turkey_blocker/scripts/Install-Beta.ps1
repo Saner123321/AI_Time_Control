@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 [CmdletBinding()]
-param([switch]$StartExisting,[switch]$Recover,[switch]$NewSession)
+param([switch]$StartExisting,[switch]$Recover,[switch]$NewSession,[switch]$ShortTrial)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $taskPackage=Split-Path -Parent $PSScriptRoot
@@ -60,6 +60,15 @@ function Ensure-BetaTask($Context,[string]$Kind) {
     }
     Set-BetaTaskSecurity $taskName
 }
+function Sync-BetaTrialSafety($Context,$Config) {
+    if($Config.hostTrial -and -not ($Config.PSObject.Properties['continuousUse'] -and $Config.continuousUse)) { Ensure-BetaTask $Context 'TrialSafety';return }
+    $taskName='AICT-Beta-TrialSafety-'+$Context.Id
+    $taskPresent=Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if($null -eq $taskPresent){return}
+    if(@($taskPresent.Actions).Count -ne 1 -or $taskPresent.Actions[0].Execute -ine (Join-Path $Context.Root 'Service\Aict.Beta.Service.exe') -or $taskPresent.Actions[0].Arguments -cne '--host-trial-safety' -or $taskPresent.Principal.UserId -notin @('SYSTEM','S-1-5-18') -or $taskPresent.State -eq 'Running'){throw 'Obsolete safety task ownership/state mismatch; left unchanged.'}
+    $null=Disable-ScheduledTask -TaskName $taskName
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+}
 $taskResult=[ordered]@{kind='AICT_BETA_SETUP';atUtc=[DateTimeOffset]::UtcNow.ToString('o');completed=$false;root=$null;importedLegacy=$false;recovery=$Recover.IsPresent;error=$null}
 $taskContext=$null
 try {
@@ -104,7 +113,7 @@ try {
         foreach($taskMeta in @('MANIFEST.json','SHA256SUMS.txt')) { Copy-Item -LiteralPath (Join-Path $taskPackage $taskMeta) -Destination (Join-Path $taskRoot $taskMeta);Set-BetaOwner (Join-Path $taskRoot $taskMeta) }
         $null=New-Item -ItemType Directory -Path (Join-Path $taskRoot 'state') -Force
         foreach($taskDir in @(Get-ChildItem -LiteralPath $taskRoot -Directory -Recurse)) { Set-BetaOwner $taskDir.FullName }
-        Write-BetaJson (Join-Path $taskRoot 'config.json') @{runId=$taskId;probeSid=$taskSid;targetSipHash=$taskSource.target_sip_hash;targetSize=$taskSource.target_size;interactiveMode=$true;hostTrial=$taskHostBuild;hostTrialEndsUtc=$(if($taskHostBuild){[DateTimeOffset]::UtcNow.AddMinutes(30).ToString('o')}else{$null})};Set-BetaOwner (Join-Path $taskRoot 'config.json')
+        Write-BetaJson (Join-Path $taskRoot 'config.json') @{runId=$taskId;probeSid=$taskSid;targetSipHash=$taskSource.target_sip_hash;targetSize=$taskSource.target_size;interactiveMode=$true;hostTrial=$taskHostBuild;continuousUse=($taskHostBuild -and -not $ShortTrial);hostTrialEndsUtc=$(if($taskHostBuild -and $ShortTrial){[DateTimeOffset]::UtcNow.AddMinutes(30).ToString('o')}else{$null})};Set-BetaOwner (Join-Path $taskRoot 'config.json')
     }
     foreach($taskRuntimeFolder in @('state','probe')) {
         $taskRuntimePath=Join-Path $taskRoot $taskRuntimeFolder
@@ -112,7 +121,8 @@ try {
         Assert-BetaProtected $taskRuntimePath
     }
     $taskResult.root=$taskRoot
-    foreach($taskKind in $(if($taskHostBuild -and -not $Recover){@('Recovery','Uninstall','Agent','TrialSafety')}else{@('Recovery','Uninstall','Agent')})) { Ensure-BetaTask $taskContext $taskKind }
+    foreach($taskKind in @('Recovery','Uninstall','Agent')) { Ensure-BetaTask $taskContext $taskKind }
+    if(-not $Recover){Sync-BetaTrialSafety $taskContext (Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $taskRoot 'config.json')|ConvertFrom-Json)}
     if($Recover) {
         Start-ScheduledTask -TaskName ('AICT-Beta-Recovery-'+$taskId)
         $taskWait=[Diagnostics.Stopwatch]::StartNew();$taskCleanup=Join-Path $taskRoot 'state\cleanup-result.json'
@@ -135,7 +145,7 @@ try {
         while($taskWait.Elapsed.TotalSeconds -lt 90) { try { $taskStatus=Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $taskRoot 'state\status.json') | ConvertFrom-Json;if($taskStatus.ok -and $taskStatus.status.storageHealthy -and $taskStatus.status.execution.confirmed -and $taskStatus.status.telemetryConnected -and $taskStatus.status.clockConsistent) { $taskHealthy=$true;break } }catch{};Start-Sleep -Milliseconds 250 }
         if(-not $taskHealthy) { throw 'Backend policy readback not healthy; preserve state/service-fault.json, status.json and setup-result.json.' }
         $taskShell=New-Object -ComObject WScript.Shell
-        try { $taskShortcutPath=Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) $(if($taskHostBuild){'专注计划（主机测试）.lnk'}else{'专注计划.lnk'});$taskShortcut=$taskShell.CreateShortcut($taskShortcutPath);if((Test-Path -LiteralPath $taskShortcutPath) -and -not $taskShortcut.TargetPath.StartsWith((Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'AICT-Beta-'),[StringComparison]::OrdinalIgnoreCase)) { throw 'Existing unrelated desktop shortcut left unchanged.' };$taskShortcut.TargetPath=Join-Path $taskRoot 'App\Aict.Beta.Desktop.exe';$taskShortcut.WorkingDirectory=$taskRoot;$taskShortcut.Description='专注计划：应用与网站规则、日程、额度和锁定';$taskShortcut.Save() }finally { [Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskShell)|Out-Null }
+        try { $taskShortcutPath=Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) '专注计划.lnk';$taskShortcut=$taskShell.CreateShortcut($taskShortcutPath);if((Test-Path -LiteralPath $taskShortcutPath) -and $taskShortcut.TargetPath -ine (Join-Path $taskRoot 'App\Aict.Beta.Desktop.exe')) { throw 'Existing unrelated desktop shortcut left unchanged.' };$taskShortcut.TargetPath=Join-Path $taskRoot 'App\Aict.Beta.Desktop.exe';$taskShortcut.WorkingDirectory=$taskRoot;$taskShortcut.Description='专注计划：应用与网站规则、日程、额度和锁定';$taskShortcut.Save() }finally { [Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskShell)|Out-Null }
         $taskArp='HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\AICT-Beta-'+$taskId;$null=New-Item -Path $taskArp -Force
         foreach($taskPair in @(@('DisplayName','专注计划（自用测试版）'),@('DisplayVersion','0.1.0'),@('Publisher','AICT personal project'),@('InstallLocation',$taskRoot),@('UninstallString',('"'+(Join-Path $taskRoot 'App\Aict.Beta.Desktop.exe')+'" --uninstall')))) { $null=New-ItemProperty -LiteralPath $taskArp -Name $taskPair[0] -Value $taskPair[1] -PropertyType String -Force }
         $taskResult.completed=$true

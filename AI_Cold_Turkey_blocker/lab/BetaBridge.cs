@@ -57,7 +57,7 @@ namespace AictServicePolicyLab {
             // Cleanup can infer the fixed deny SID from a fully shape-checked owned policy if config was damaged.
             if(mode=="--cleanup")return;
             var config=Read(Join("config.json"));Require((string)config["runId"]==RunId,"Run mismatch");ProbeSid=(string)config["probeSid"];
-            Require(!HostTrialBuild || config.ContainsKey("hostTrial") && Convert.ToBoolean(config["hostTrial"]) && config.ContainsKey("hostTrialEndsUtc"),"Host trial installation identity missing");
+            Require(!HostTrialBuild || config.ContainsKey("hostTrial") && Convert.ToBoolean(config["hostTrial"]) && config.ContainsKey("hostTrialEndsUtc") && ((config.ContainsKey("continuousUse") && Convert.ToBoolean(config["continuousUse"])) != (config["hostTrialEndsUtc"]!=null)),"Host installation mode missing or inconsistent");
             Require(ProbeSid.StartsWith("S-1-5-21-",StringComparison.Ordinal),"Local-user SID required");new SecurityIdentifier(ProbeSid);
             if(mode=="--probe")Require(WindowsIdentity.GetCurrent().User.Value==ProbeSid,"Unexpected probe SID");
             ValidateInstallationLayout(Root);

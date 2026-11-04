@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 [CmdletBinding()]
-param([switch]$SelfTest,[switch]$HostTrial,[switch]$SourceFixtures)
+param([switch]$SelfTest,[Alias('Host')][switch]$HostTrial,[switch]$SourceFixtures)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $taskRoot=Split-Path -Parent $PSScriptRoot

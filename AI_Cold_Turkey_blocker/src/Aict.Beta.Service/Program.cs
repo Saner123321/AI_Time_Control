@@ -14,7 +14,8 @@ try {
     if(args.SequenceEqual(new[]{"--vm-beta"})){ServiceBase.Run(new BetaService());return 0;}
     if(args.SequenceEqual(new[]{"--request-recovery"})){BetaService.RunMaintenance(true);return 0;}
     if(args.SequenceEqual(new[]{"--host-trial-safety"})){
-        if(!BuildMode.HostTrial || !Env.Config.HostTrial || Env.Config.HostTrialEndsUtc is not {} end || DateTimeOffset.UtcNow<end)throw new UnauthorizedAccessException("Host trial safety deadline not reached");
+        if(BuildMode.HostTrial && Env.Config.ContinuousUse){Env.Log("ObsoleteTrialSafetySkipped",new{continuousUse=true});return 0;}
+        if(!BuildMode.HostTrial || !Aict.Core.HostInstallation.ShouldRunTrialSafety(Env.Config.ContinuousUse,Env.Config.HostTrialEndsUtc,DateTimeOffset.UtcNow))throw new UnauthorizedAccessException("Host trial safety deadline not reached");
         bool released=false;try{string file=Path.Combine(Env.Root,"state","status.json");var status=PolicyJson.Parse<Aict.Beta.Response>(File.ReadAllText(file)).Status;using var service=new ServiceController(Env.Name);released=!Aict.Beta.HostTrialSafety.NeedsIndependentCleanup(status,DateTimeOffset.UtcNow,File.GetLastWriteTimeUtc(file),service.Status==ServiceControllerStatus.Running);}catch(Exception e){Env.Log("TrialSafetyStatusUnavailable",new {error=e.Message});}
         if(released){Env.Save(Path.Combine(Env.Root,"state","trial-safety.json"),new{completed=true,independentCleanupRequired=false,atUtc=DateTimeOffset.UtcNow});return 0;}
         args=["--beta-cleanup-force"];

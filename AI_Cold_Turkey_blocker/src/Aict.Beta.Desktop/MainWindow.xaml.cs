@@ -42,7 +42,7 @@ public partial class MainWindow : Window {
     async void OnLoaded(object sender,RoutedEventArgs e) {
         try {
             await connection.EnsureStartedAsync();
-            Title=BuildMode.HostTrial?"专注计划 · 主机短时测试":"专注计划 · 自用测试版";if(BuildMode.HostTrial)((ComboBoxItem)AppMode.Items[2]).IsEnabled=false;ModeNotice.Text=connection.Simulated?"界面自测：不修改系统、不启用真实封锁。":"后台持续执行应用与网站规则。关闭界面不解锁；网站保护启用期间请保持浏览器组件连接。";
+            Title="专注计划";if(BuildMode.HostTrial)((ComboBoxItem)AppMode.Items[2]).IsEnabled=false;ModeNotice.Text=connection.Simulated?"界面自测：不修改系统、不启用真实封锁。":"后台持续执行应用与网站规则。关闭界面不解锁；网站保护启用期间请保持浏览器组件连接。";
             FooterNotice.Text="当前规则在等待期间继续运行。待生效规则到期自动切换；已保存与实际执行状态分别显示。";DemoButton.Visibility=Visibility.Visible;
             DelayNotice.Text="收紧限制立即生效；包含放宽的修改按当前等待时间提交，到期自动切换。编辑待生效内容并重新提交将重新计时。";
             string names=Path.Combine(connection.DataDirectory,"app-labels.json");
@@ -99,7 +99,9 @@ public partial class MainWindow : Window {
             string wait=remaining>TimeSpan.Zero?"尚需等待 "+Duration(remaining)+"（到 "+Local(p.NotBeforeUtc)+"）":"等待后台自动切换";
             PendingText.Text="待生效规则已保存 · "+wait+"\n等待期间，当前规则继续运行；到期自动切换。"+clock;
         } else PendingText.Text="没有待生效修改 · 放宽限制等待 "+Duration(status.Policy.ChangeDelay)+clock;
+        Title=status.TrialEndsUtc is null?"专注计划":"专注计划 · 短时测试";
         if(status.TrialEndsUtc is {} end)ModeNotice.Text=status.TrialExpired?"主机首轮测试已结束。已保留并停用规则；请查看执行状态确认解除，可以导出或正常卸载。":"主机短时测试 · 到 "+Local(end)+" 自动解除限制并保留规则。选定内容后才会封锁，独立管理员恢复工具随包提供。";
+        else ModeNotice.Text=connection.Simulated?"界面自测：不修改系统、不启用真实封锁。":"持续使用 · 按你的日程、额度和锁定规则执行，不因使用时长自动停用。关闭界面不解锁。";
         if(status.Fault is {} fault) Feedback.Text=fault;
         if(status.UninstallReady) {SubmitButton.IsEnabled=false;Feedback.Text="卸载已获准，后台正在撤销本软件的限制，规则与日志将保留。";}
         if(draftToken is not null && draftToken!=status.EditToken) DraftState.Text="后台配置已变化；请重新读取后提交";
@@ -287,6 +289,7 @@ public partial class MainWindow : Window {
     void Statistics(object sender,RoutedEventArgs e)=>new StatisticsWindow(connection){Owner=this}.ShowDialog();
     void Diagnostics(object sender,RoutedEventArgs e)=>new DiagnosticsWindow(connection){Owner=this}.ShowDialog();
     async Task SelfTestAsync() {
+        if(Title!="专注计划" || latest?.TrialEndsUtc is not null)throw new InvalidOperationException("持续使用界面不应显示短时测试标题或截止时间");
         timer.Stop();var empty=NewGroup();if(empty.Cycle is not null)throw new InvalidOperationException("新规则不应默认启用循环");StartDraft(empty);
         RuleName.Text="自用版界面检查";ApplicationModeForTest();
         Sites.Text="*bilibili*\nhttps://www.youtube.com/watch?v=test";SiteMode.SelectedIndex=1;QuotaEnabled.IsChecked=true;QuotaMinutes.Text="30";Always.IsChecked=false;CycleEnabled.IsChecked=false;Enabled.IsChecked=true;LockWhile.IsChecked=false;DelayUnit.SelectedIndex=0;DelayHours.Text="1";
@@ -300,7 +303,7 @@ public partial class MainWindow : Window {
         await Render("editor.png");QuotaHint.BringIntoView();await Dispatcher.InvokeAsync(()=>{},DispatcherPriority.ApplicationIdle);await Render("quota.png");EditorScroll.ScrollToEnd();await Render("schedule.png");
         var organizer=new ExceptionWindow(exceptionRows);organizer.TestSearch("学习资料");if(organizer.VisibleCount!=1)throw new InvalidOperationException("例外搜索未匹配分组");organizer.TestSearch("");
         var content=(FrameworkElement)organizer.Content;organizer.Content=null;var preview=new Border{Background=Brushes.White,Child=content};preview.Measure(new Size(952,620));preview.Arrange(new Rect(0,0,952,620));preview.UpdateLayout();var picture=new RenderTargetBitmap(952,620,96,96,PixelFormats.Pbgra32);picture.Render(preview);var image=new PngBitmapEncoder();image.Frames.Add(BitmapFrame.Create(picture));using(var file=File.Create(Path.Combine(output,"exceptions.png")))image.Save(file);
-        organizer.Close();File.WriteAllText(Path.Combine(output,"result.json"),PolicyJson.Serialize(new{passed=true,customWebsites=true,quotaConfigured=true,windowQuota=true,independentQuotaSlots=2,pendingFrozen=true,exceptionNotes=true,groupSearch=true,newRulesHaveNoCycle=true,systemWrites=false}));Close();
+        organizer.Close();File.WriteAllText(Path.Combine(output,"result.json"),PolicyJson.Serialize(new{passed=true,customWebsites=true,quotaConfigured=true,windowQuota=true,independentQuotaSlots=2,pendingFrozen=true,exceptionNotes=true,groupSearch=true,newRulesHaveNoCycle=true,continuousModeTitle=true,systemWrites=false}));Close();
         void ApplicationModeForTest(){AppMode.SelectedIndex=0;}
     }
 

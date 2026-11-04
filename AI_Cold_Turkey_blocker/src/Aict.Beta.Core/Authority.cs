@@ -7,11 +7,11 @@ public sealed class Authority:IDisposable {
     readonly StateRepository repository;readonly IClock clock;readonly HashSet<string> essentials;readonly Action<string,object>? log;readonly Action<ActivityFrame>? recordActivity;readonly SemaphoreSlim gate=new(1,1);
     EngineSnapshot state;long revision,lastTick,lastAwake,lastAgent=-100000,lastPersist;readonly long started;AgentSample? agent;
     readonly Dictionary<string,(BrowserSample Sample,long Tick)> browsers=[];
-    readonly DateTimeOffset? trialEndsUtc;
+    readonly DateTimeOffset? trialEndsUtc;readonly bool restrictApplicationAllowlist;
     bool TrialExpired=>trialEndsUtc is {} end && (clock.UtcNow>=end || state.Clock.EffectiveUtc>=end);
     string? storageFault,appFault,verifiedApp,webFault,publishedWeb;ImmutableArray<string> actualDenied=[];int actualAllow;bool firewallClosed,gateConfirmed;
-    public Authority(StateRepository repository,IClock clock,IEnumerable<string> essentialIds,Action<string,object>? log=null,Action<ActivityFrame>? recordActivity=null,DateTimeOffset? trialEndsUtc=null) {
-        this.trialEndsUtc=trialEndsUtc;
+    public Authority(StateRepository repository,IClock clock,IEnumerable<string> essentialIds,Action<string,object>? log=null,Action<ActivityFrame>? recordActivity=null,DateTimeOffset? trialEndsUtc=null,bool restrictApplicationAllowlist=false) {
+        this.trialEndsUtc=trialEndsUtc;this.restrictApplicationAllowlist=restrictApplicationAllowlist;
         this.repository=repository;this.clock=clock;essentials=essentialIds.ToHashSet(StringComparer.Ordinal);this.log=log;this.recordActivity=recordActivity;var saved=repository.Read();revision=saved.Revision;state=saved.Snapshot;lastTick=clock.Uptime;lastAwake=clock.AwakeMilliseconds;lastPersist=lastTick;started=lastTick;
         if(state.ServiceAnchor is {} anchor && anchor.ClockWasTrusted) {
             if(anchor.BootId==clock.BootId && lastTick>=anchor.UptimeMilliseconds)state=state with {Clock=new RuntimeClock(state.Clock.EffectiveUtc+TimeSpan.FromMilliseconds(lastTick-anchor.UptimeMilliseconds),true).Advance(clock.UtcNow,TimeSpan.Zero)};
@@ -25,7 +25,7 @@ public sealed class Authority:IDisposable {
     string Token=>PolicyJson.Sha256(PolicyJson.Fingerprint(state.Policy)+"/"+state.Pending?.Id+"/"+PolicyJson.Serialize(state.Applications)+"/"+state.UninstallReady);
     void Validate(PolicyConfiguration p) {
         PolicyValidation.Validate(p);if(p.Groups.Count(g=>g.ApplicationMode==TargetMode.AllowSelected)>8)throw new ArgumentException("应用白名单规则最多8组。");
-        if(trialEndsUtc is not null && p.Groups.Any(g=>g.Enabled && g.ApplicationMode==TargetMode.AllowSelected))throw new ArgumentException("主机首轮测试只限制明确选中的应用，暂不启用应用白名单。");
+        if((restrictApplicationAllowlist || trialEndsUtc is not null) && p.Groups.Any(g=>g.Enabled && g.ApplicationMode==TargetMode.AllowSelected))throw new ArgumentException("主机版本暂只限制明确选中的应用，不启用应用白名单。");
         foreach(var g in p.Groups)foreach(string id in g.ApplicationIds.Concat(g.ApplicationExceptions)) {if(essentials.Contains(id))throw new ArgumentException("不能限制系统必需程序和本软件组件。");if(!state.Applications.Any(a=>a.Id==id))throw new ArgumentException("请先选择并登记应用文件。");}
     }
     void Commit(EngineSnapshot next) {

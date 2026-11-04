@@ -38,4 +38,18 @@ namespace Aict.Core.Tests;
     [TestMethod] public async Task HostTrialRejectsAppAllowlistAndDoesNotLoseExpiryAcrossRestart(){var(a,c,p)=Create(10);var end=c.UtcNow.AddSeconds(10);await Register(a);var g=Web() with {ApplicationMode=TargetMode.AllowSelected,ApplicationIds=[App.Id]};Assert.IsFalse((await Submit(a,new(){ChangeDelay=TimeSpan.Zero,Groups=[g]})).Ok);await Submit(a,new(){ChangeDelay=TimeSpan.Zero,Groups=[Web()]});a.Dispose();c.Add(11000);using var recovered=new Authority(StateRepository.OpenExisting(p),c,[],trialEndsUtc:end);Assert.IsTrue((await Status(recovered)).TrialExpired);Assert.IsFalse((await Status(recovered)).Policy.Groups.Single().Enabled);}
     [TestMethod] public async Task FailedNetworkApplyIsNotReportedAsConfirmedRestriction(){var(a,c,p)=Create();using(a){await Submit(a,new(){ChangeDelay=TimeSpan.Zero,Groups=[Web()]});await a.Observe((await a.Desired()).Apps,null,null,false,"network error",networkConfirmed:false);Assert.IsFalse((await Status(a)).Websites.GateConfirmed);Assert.IsFalse((await Status(a)).Websites.FirewallClosed);}}
     [TestMethod] public async Task HostSafetyRequiresFreshConfirmedReleasedStateAndRunningService(){var(a,c,p)=Create(1);using(a){await Submit(a,new(){ChangeDelay=TimeSpan.Zero,Groups=[Web()]});c.Add(1000);var plan=await a.Desired();await a.Observe(plan.Apps,null,plan.Web.Fingerprint,false,null,networkConfirmed:true);var s=await Status(a);Assert.IsFalse(HostTrialSafety.NeedsIndependentCleanup(s,c.UtcNow,c.UtcNow,true));Assert.IsTrue(HostTrialSafety.NeedsIndependentCleanup(s,c.UtcNow,c.UtcNow.AddSeconds(-6),true));Assert.IsTrue(HostTrialSafety.NeedsIndependentCleanup(s,c.UtcNow,c.UtcNow,false));Assert.IsTrue(HostTrialSafety.NeedsIndependentCleanup(s with {Websites=s.Websites with {GateConfirmed=false}},c.UtcNow,c.UtcNow,true));Assert.IsTrue(HostTrialSafety.NeedsIndependentCleanup(s with {Websites=s.Websites with {FirewallClosed=true}},c.UtcNow,c.UtcNow,true));}}
+    [TestMethod] public async Task ContinuousUsePassesThirtyMinutesAndRestartWithoutDisablingOrCancellingPending(){
+        var(a,c,p)=Create();var g=Web() with {LockWhileBlocking=true};
+        Assert.IsTrue((await Submit(a,new(){ChangeDelay=TimeSpan.FromHours(3),Groups=[g]})).Ok);
+        await Submit(a,(await Status(a)).Policy with {Groups=[g with {WebsiteExceptions=["mail.example.com"]}]});
+        var pending=(await Status(a)).Pending!;c.Add(31*60000);
+        var s=await Status(a);Assert.IsNull(s.TrialEndsUtc);Assert.IsFalse(s.TrialExpired);Assert.IsTrue(s.Policy.Groups.Single().Enabled);Assert.AreEqual(pending.Id,s.Pending!.Id);Assert.AreEqual(TimeSpan.FromHours(3),s.Policy.ChangeDelay);Assert.IsTrue((await a.Desired()).Web.Required);a.Dispose();
+        using var recovered=new Authority(StateRepository.OpenExisting(p),c,[]);var restored=await Status(recovered);Assert.IsTrue(restored.Policy.Groups.Single().Enabled);Assert.AreEqual(pending.Id,restored.Pending!.Id);Assert.AreEqual(pending.NotBeforeUtc,restored.Pending.NotBeforeUtc);
+        Assert.IsTrue((await Submit(recovered,restored.Policy with {Groups=[g with {WebsiteDomains=["example.com","other.org"]}]})).Ok);
+    }
+    [TestMethod] public async Task ContinuousHostStillRejectsApplicationAllowlist(){
+        var(a,c,p)=Create();await Register(a);a.Dispose();using var host=new Authority(StateRepository.OpenExisting(p),c,[],restrictApplicationAllowlist:true);
+        Assert.IsFalse((await Submit(host,new(){ChangeDelay=TimeSpan.Zero,Groups=[Web() with {ApplicationMode=TargetMode.AllowSelected,ApplicationIds=[App.Id]}]})).Ok);
+    }
+
 }
