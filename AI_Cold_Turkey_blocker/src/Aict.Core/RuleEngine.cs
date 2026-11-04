@@ -42,8 +42,8 @@ public static class RuleEngine {
         if(group.Cycle is {} cycle && CycleActive(cycle,clock.EffectiveUtc)) reasons.Add(BlockReason.Cycle);
         foreach(var quota in QuotaSchedules.Specs(group).Where(q=>QuotaPeriods.At(policy,q,clock.EffectiveUtc).Contains(clock.EffectiveUtc))) {
             var period=QuotaPeriods.At(policy,quota,clock.EffectiveUtc);var account=usage.Get(group.Id,period.Day,quota.Id);
-            if(account.HasGap || !telemetryHealthy) reasons.Add(BlockReason.UsageGap);
-            else if(account.KnownTicks>=quota.Limit.Ticks) reasons.Add(BlockReason.QuotaExhausted);
+            if(account.UnresolvedGap) reasons.Add(BlockReason.UsageGap);
+            else if(account.ChargedTicks>=quota.Limit.Ticks) reasons.Add(BlockReason.QuotaExhausted);
         }
         return reasons.ToImmutable();
     }
@@ -54,7 +54,7 @@ public static class RuleEngine {
             TimeSpan? remaining=null;
             foreach(var quota in QuotaSchedules.Specs(g).Where(q=>QuotaPeriods.At(policy,q,clock.EffectiveUtc).Contains(clock.EffectiveUtc))) {
                 var period=QuotaPeriods.At(policy,quota,clock.EffectiveUtc);var account=usage.Get(g.Id,period.Day,quota.Id);
-                if(clock.Trusted && telemetryHealthy && !account.HasGap) remaining=TimeSpan.FromTicks(Math.Max(0,quota.Limit.Ticks-account.KnownTicks));
+                if(clock.Trusted && !account.UnresolvedGap) remaining=TimeSpan.FromTicks(Math.Max(0,quota.Limit.Ticks-account.ChargedTicks));
             }
             decisions.Add(new(g.Id,Reasons(policy,g,usage,clock,telemetryHealthy),remaining));
         }
@@ -73,9 +73,12 @@ public static class RuleEngine {
         var begin=ledger.LastAccountedUntilUtc is {} previous && previous>slice.StartUtc?previous:slice.StartUtc;
         if(slice.ObservationKnown && (!slice.Foreground || slice.SessionLocked || slice.Suspended)) return ledger with {LastAccountedUntilUtc=until};
         if(!slice.ObservationKnown || slice.Duration>MaximumObservedSlice) {
-            // Missing observations are censored usage, never a precise zero.
+            // Charge only the intersecting unobserved time, once per rule/slot.
+            // Keep it separate from measured use; a gap is no longer an entire-period lock.
             if(until>begin) foreach(var g in policy.Groups.Where(g=>g.Enabled && QuotaSchedules.HasQuota(g)))
-                foreach(var quota in QuotaSchedules.Specs(g))foreach(var p in QuotaPeriods.Intersections(policy,quota,begin,until))ledger=ledger.Put(g.Id,p.Day,ledger.Get(g.Id,p.Day,quota.Id) with {HasGap=true},quota.Id);
+                foreach(var quota in QuotaSchedules.Specs(g))foreach(var p in QuotaPeriods.Intersections(policy,quota,begin,until)){
+                    var a=ledger.Get(g.Id,p.Day,quota.Id);ledger=ledger.Put(g.Id,p.Day,a with {HasGap=true,GapChargedTicks=checked(a.GapChargedTicks+(p.EndUtc-p.StartUtc).Ticks),GapChargeComplete=!a.UnresolvedGap},quota.Id);
+                }
             return ledger with {LastAccountedUntilUtc=until};
         }
         var activeUntil=slice.StartUtc+TimeSpan.FromTicks(Math.Min(slice.Duration.Ticks,Math.Max(0,(IdleThreshold-slice.IdleAtStart).Ticks)));

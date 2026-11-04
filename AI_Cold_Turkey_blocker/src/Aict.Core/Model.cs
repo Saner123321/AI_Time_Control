@@ -47,7 +47,13 @@ public sealed record PolicyConfiguration {
 public sealed record ActivityContext(string? ApplicationId=null, string? WebsiteDomain=null) {
     [JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] public string? WebsiteUrl {get;init;}
 }
-public sealed record DailyUsage(long KnownTicks=0, bool HasGap=false);
+public sealed record DailyUsage(long KnownTicks=0, bool HasGap=false) {
+    [JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingDefault)] public long GapChargedTicks {get;init;}
+    [JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingDefault)] public bool GapChargeComplete {get;init;}
+    [JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingDefault)] public bool GapEstimated {get;init;}
+    [JsonIgnore] public long ChargedTicks=>checked(KnownTicks+GapChargedTicks);
+    [JsonIgnore] public bool UnresolvedGap=>HasGap&&!GapChargeComplete;
+}
 public sealed record UsageLedger {
     public ImmutableDictionary<string,DailyUsage> Accounts { get; init; } = ImmutableDictionary<string,DailyUsage>.Empty;
     public DateTimeOffset? LastAccountedUntilUtc { get; init; }

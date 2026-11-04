@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 [CmdletBinding()]
-param()
+param([string]$UpdaterPath)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $taskProject=Split-Path -Parent $PSScriptRoot
@@ -19,7 +19,8 @@ function Import-TestFunctions([string]$Path,[string[]]$Names) {
         . ([ScriptBlock]::Create($taskDefinition))
     }
 }
-Import-TestFunctions (Join-Path $taskProject 'scripts\Update-Continuous.ps1') @('Write-UpdateJson','Assert-UpdateTrialSafety','Pause-UpdateTrialSafety','Set-UpdateContinuousMode','Complete-UpdateTrialSafety','Restore-UpdateTrialSafety')
+if(-not $UpdaterPath){$UpdaterPath=Join-Path $taskProject 'scripts\Update-Continuous.ps1'}
+Import-TestFunctions $UpdaterPath @('Write-UpdateJson','Assert-UpdateTrialSafety','Pause-UpdateTrialSafety','Set-UpdateContinuousMode','Complete-UpdateTrialSafety','Restore-UpdateTrialSafety')
 Import-TestFunctions (Join-Path $taskProject 'scripts\Install-Beta.ps1') @('Sync-BetaTrialSafety')
 # Real config-file operations, explicit substitutes for all system/task/ownership operations.
 function Set-UpdateOwner([string]$Path){if(-not(Test-Path -LiteralPath $Path)){throw 'Missing fixture file'}}

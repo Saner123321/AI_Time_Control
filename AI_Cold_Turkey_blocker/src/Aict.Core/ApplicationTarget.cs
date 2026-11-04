@@ -9,4 +9,6 @@ public sealed record ApplicationTarget(string Id,string Name,string FileName,lon
     }
 }
 // Saved atomically with rules. A matching OS boot identity plus monotonic uptime verifies continuity after a service crash.
-public sealed record ServiceTimeAnchor(string BootId,long UptimeMilliseconds,bool ClockWasTrusted);
+public sealed record ServiceTimeAnchor(string BootId,long UptimeMilliseconds,bool ClockWasTrusted) {
+    [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] public long? AwakeMilliseconds {get;init;}
+}

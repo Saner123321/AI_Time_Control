@@ -25,10 +25,10 @@ public sealed class StateRepository {
         PolicyValidation.Validate(value.Policy);
         if(value.Applications.IsDefault || value.Applications.Length>64 || value.Applications.Any(a=>a is null) || value.Applications.Select(a=>a.Id).Distinct(StringComparer.Ordinal).Count()!=value.Applications.Length) throw new ArgumentException("Invalid application catalog");
         foreach(var app in value.Applications) app.Validate();
-        if(value.ServiceAnchor is {} anchor && (string.IsNullOrWhiteSpace(anchor.BootId) || anchor.BootId.Length>100 || anchor.UptimeMilliseconds<0)) throw new ArgumentException("Invalid service time anchor");
+        if(value.ServiceAnchor is {} anchor && (string.IsNullOrWhiteSpace(anchor.BootId) || anchor.BootId.Length>100 || anchor.UptimeMilliseconds<0 || anchor.AwakeMilliseconds is <0)) throw new ArgumentException("Invalid service time anchor");
         foreach(var pair in value.Usage.Accounts) {
             var parts=pair.Key.Split('/');
-            if(parts.Length is not (2 or 3) || !Guid.TryParseExact(parts[0],"N",out _) || !DateOnly.TryParseExact(parts[1],"yyyy-MM-dd",out _) || parts.Length==3 && (!Guid.TryParseExact(parts[2],"N",out var slot) || slot==Guid.Empty) || pair.Value is null || pair.Value.KnownTicks<0) throw new ArgumentException("Invalid usage account");
+            if(parts.Length is not (2 or 3) || !Guid.TryParseExact(parts[0],"N",out _) || !DateOnly.TryParseExact(parts[1],"yyyy-MM-dd",out _) || parts.Length==3 && (!Guid.TryParseExact(parts[2],"N",out var slot) || slot==Guid.Empty) || pair.Value is null || pair.Value.KnownTicks<0 || pair.Value.GapChargedTicks<0 || pair.Value.GapChargedTicks>long.MaxValue-pair.Value.KnownTicks || pair.Value.GapChargedTicks>0&&!pair.Value.HasGap) throw new ArgumentException("Invalid usage account");
         }
         if(value.Pending is {} p) {
             if(p.Id==Guid.Empty || !Enum.IsDefined(p.Purpose) || p.SubmittedUtc>p.NotBeforeUtc || string.IsNullOrEmpty(p.TargetJson) || p.TargetSha256!=PolicyJson.Sha256(p.TargetJson)) throw new ArgumentException("Invalid frozen pending change");

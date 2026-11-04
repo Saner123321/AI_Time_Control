@@ -101,11 +101,11 @@ public sealed class PreviewTests {
         time.Add(TimeSpan.FromHours(8));await host.TickAsync();Assert.IsNull((await Status(host)).Pending);Assert.IsTrue((await Status(host)).Policy.Groups.IsEmpty);
     }
     [TestMethod]
-    public async Task MissingCollectorDoesNotTreatQuotaAsUnusedAndUnlockModification() {
+    public async Task CollectorLossAloneDoesNotLockAnUnspentQuotaInPreview() {
         var group=new RuleGroup {Id=Guid.NewGuid(),Name="额度",WebsiteMode=TargetMode.BlockSelected,WebsiteDomains=["example.com"],DailyQuota=TimeSpan.FromHours(1),LockWhileBlocking=true};
         var policy=new PolicyConfiguration {ChangeDelay=TimeSpan.Zero,Groups=[group]};var (repo,time)=NewRepository(policy);using var host=new PreviewAuthority(repo,time);
         var queued=await host.HandleAsync(new() {Command=PreviewCommand.SubmitPolicy,EditToken=(await Status(host)).EditToken,Policy=policy with {Groups=[]}});
-        Assert.IsTrue(queued.Ok);Assert.AreEqual(ApplyStatus.Locked,queued.Status!.PendingStatus);Assert.IsNotNull(queued.Status.Pending);
+        Assert.IsTrue(queued.Ok);Assert.AreEqual(ApplyStatus.NoPendingChange,queued.Status!.PendingStatus);Assert.IsNull(queued.Status.Pending);Assert.IsTrue(queued.Status.Policy.Groups.IsEmpty);
     }
     [TestMethod]
     public async Task WallClockJumpCannotFinishAnHourDelayInOneSecond() {

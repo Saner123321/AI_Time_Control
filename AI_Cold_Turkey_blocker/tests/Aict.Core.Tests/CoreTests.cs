@@ -129,7 +129,7 @@ public sealed class UsageTests {
     public void MissingDataIsNotAZeroAllowanceReport() {
         var p=Samples.Policy();var ledger=RuleEngine.Account(p,new(),new(Samples.At(2),TimeSpan.FromSeconds(10),new(),ObservationKnown:false));
         var result=RuleEngine.Evaluate(p,ledger,new("app.video"),new(Samples.At(2,10)));
-        Assert.IsTrue(result.Blocked);Assert.IsNull(result.Groups[0].QuotaRemaining);Assert.IsTrue(result.Groups[0].Reasons.Contains(BlockReason.UsageGap));
+        Assert.IsFalse(result.Blocked);Assert.AreEqual(TimeSpan.FromSeconds(50),result.Groups[0].QuotaRemaining);Assert.AreEqual(TimeSpan.FromSeconds(10).Ticks,ledger.Get(Samples.GroupId,new(2026,11,2)).GapChargedTicks);
     }
     [TestMethod]
     public void MultiDayGapMarksEveryCoveredDayButNotExclusiveEnd() {
@@ -153,7 +153,7 @@ public sealed class ExportTests {
         var p=Samples.Policy(Samples.Quota() with {Name="=danger,\"quoted\""});
         var ledger=new UsageLedger().Put(Samples.GroupId,new(2026,11,2),new(15000000,true));
         string csv=UsageExport.ToCsv(p,ledger);
-        StringAssert.Contains(csv,"\"'=danger,\"\"quoted\"\"\"");StringAssert.Contains(csv,",1.5,true\r\n");
+        StringAssert.Contains(csv,"\"'=danger,\"\"quoted\"\"\"");StringAssert.Contains(csv,",1.5,true,0,1.5,false,false\r\n");
     }
     [TestMethod]
     public void JsonExportKeepsFrozenPayloadAndUnknownUsage() {

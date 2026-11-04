@@ -22,9 +22,9 @@ public sealed class EnforcementTests {
         Assert.AreEqual(Id,ApplicationPlanner.Compile(state).DeniedIdentities.Single());
     }
     [TestMethod]
-    public void RestartAndMissingCollectorRemainConservative() {
+    public void CollectorLossAloneDoesNotExhaustQuotaButUntrustedClockStillBlocks() {
         var state=State();state=state with {Policy=state.Policy with {Groups=[state.Policy.Groups[0] with {AlwaysBlock=false,DailyQuota=TimeSpan.FromHours(1)}]}};
-        Assert.IsTrue(ApplicationPlanner.Compile(state,true).DeniedIdentities.IsEmpty);Assert.AreEqual(Id,ApplicationPlanner.Compile(state,false).DeniedIdentities.Single());
+        Assert.IsTrue(ApplicationPlanner.Compile(state,true).DeniedIdentities.IsEmpty);Assert.IsTrue(ApplicationPlanner.Compile(state,false).DeniedIdentities.IsEmpty);
         state=state with {Clock=state.Clock.AfterRestartWithoutTrustedAnchor()};Assert.AreEqual(Id,ApplicationPlanner.Compile(state,true).DeniedIdentities.Single());
     }
     [TestMethod]

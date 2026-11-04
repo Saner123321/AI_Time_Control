@@ -77,10 +77,10 @@ public partial class MainWindow : Window {
     void ShowStatus(PreviewStatus status) {
         bool changed=latest?.EditToken!=status.EditToken;bool pendingFinished=editingPending && latest?.Pending is not null && status.Pending is null;latest=status;if(pendingFinished){editingPending=false;draftBase=null;}
         BackendState.Text=status.StorageHealthy?"后台：已连接 · 持续服务":"后台：存储故障";
-        UsageText.Text=status.TelemetryConnected?"用量：前台采集正常":"用量：采集失联，额度规则保守限制";
+        UsageText.Text=status.TelemetryConnected?"用量：前台采集正常":"用量：采集暂时失联，失联时间计入额度，正在重连";
         var used=status.Usage.Where(u=>u.GroupId==editing?.Id).OrderByDescending(u=>u.QuotaWindowActive).FirstOrDefault()??status.Usage.FirstOrDefault();
         if(used is {LimitTicks:{} limit})UsageText.Text+="\n"+used.QuotaWindowLabel+"\n本周期已用 "+Duration(TimeSpan.FromTicks(used.UsedTicks))+" / "+Duration(TimeSpan.FromTicks(limit))+(used.QuotaWindowActive?"":"\n当前在额度时段外");
-        if(used?.HasGap==true)UsageText.Text+="\n采集缺口：本周期额度保守限制";
+        if(used?.HasGap==true)UsageText.Text+=used.GapChargeComplete?"\n包含失联扣时 "+TimeSpan.FromTicks(used.GapChargedTicks).TotalSeconds.ToString("0.#")+" 秒"+(used.GapEstimated?"（旧记录保守估算）":""):"\n旧版缺口尚待换算";
         foreach(var slot in quotaSlots)slot.ShowUsage(status.Usage.FirstOrDefault(u=>u.GroupId==editing?.Id && (u.QuotaSlotId==slot.Id || slot.Legacy && u.QuotaSlotId is null)));
         foreach(var app in status.Applications) appNames[app.Id]=app.Name+" · "+app.FileName;
         var execution=status.Execution;var web=status.Websites;

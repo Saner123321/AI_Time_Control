@@ -17,8 +17,8 @@ public static class BlockExplanations {
             case BlockReason.QuotaExhausted:
             case BlockReason.UsageGap:
                 foreach(var q in QuotaSchedules.Specs(group)){var p=QuotaPeriods.At(policy,q,clock.EffectiveUtc);if(!p.Contains(clock.EffectiveUtc))continue;var account=usage.Get(group.Id,p.Day,q.Id);
-                    if(r==BlockReason.QuotaExhausted && !account.HasGap && telemetry && account.KnownTicks>=q.Limit.Ticks)lines.Add(QuotaSchedules.Label(q)+" 的 "+q.Limit.TotalMinutes.ToString("0.##",CultureInfo.InvariantCulture)+" 分钟额度已用完，本时段至 "+Local(p.EndUtc)+"。");
-                    if(r==BlockReason.UsageGap && (account.HasGap||!telemetry))lines.Add(QuotaSchedules.Label(q)+" 的使用记录不完整，暂按额度不可用处理；请在软件中检查采集状态。");
+                    if(r==BlockReason.QuotaExhausted && !account.UnresolvedGap && account.ChargedTicks>=q.Limit.Ticks)lines.Add(QuotaSchedules.Label(q)+" 的 "+q.Limit.TotalMinutes.ToString("0.##",CultureInfo.InvariantCulture)+" 分钟额度已用完"+(account.GapChargedTicks>0?"（包含采集失联扣时）":"")+"，本时段至 "+Local(p.EndUtc)+"。");
+                    if(r==BlockReason.UsageGap && account.UnresolvedGap)lines.Add(QuotaSchedules.Label(q)+" 的旧版使用记录不完整，缺失时长尚待换算；请在软件中检查迁移状态。");
                 }break;
             case BlockReason.ClockUntrusted:lines.Add("系统时间校验异常，为保护当前规则暂时封锁；请在软件中查看时间状态。");break;
         }return lines.ToImmutable();

@@ -28,7 +28,7 @@ public static class QuotaPeriods {
     public static UsageLedger CarryForward(PolicyConfiguration before,PolicyConfiguration after,UsageLedger ledger,DateTimeOffset now) {
         foreach(var next in after.Groups.Where(QuotaSchedules.HasQuota)) {
             var old=before.Groups.FirstOrDefault(g=>g.Id==next.Id);if(old is null)continue;
-            if(old.QuotaSlots is null && next.QuotaSlots is null){if(old.DailyQuotaWindow==next.DailyQuotaWindow && before.TimeZoneId==after.TimeZoneId)continue;var source=ledger.Get(old.Id,At(before,old,now).Day);var legacyDay=At(after,next,now).Day;var prior=ledger.Get(next.Id,legacyDay);ledger=ledger.Put(next.Id,legacyDay,new(Math.Max(source.KnownTicks,prior.KnownTicks),source.HasGap||prior.HasGap));continue;}
+            if(old.QuotaSlots is null && next.QuotaSlots is null){if(old.DailyQuotaWindow==next.DailyQuotaWindow && before.TimeZoneId==after.TimeZoneId)continue;var source=ledger.Get(old.Id,At(before,old,now).Day);var legacyDay=At(after,next,now).Day;var prior=ledger.Get(next.Id,legacyDay);ledger=ledger.Put(next.Id,legacyDay,GapAccounting.Carry(prior,[source]));continue;}
             foreach(var n in QuotaSchedules.Specs(next)){
                 if(before.TimeZoneId==after.TimeZoneId && QuotaSchedules.Specs(old).Any(o=>o.Id==n.Id && o.Window==n.Window))continue;
                 var period=At(after,n,now);var target=ledger.Get(next.Id,period.Day,n.Id);var sourceKeys=new HashSet<(Guid? Slot,DateOnly Day)>();
@@ -36,8 +36,7 @@ public static class QuotaPeriods {
                     foreach(var overlap in Intersections(before,o,period.StartUtc,period.EndUtc))sourceKeys.Add((o.Id,overlap.Day));
                     if(o.Id==n.Id)sourceKeys.Add((o.Id,At(before,o,now).Day));
                 }
-                long known=0;bool gap=false;foreach(var key in sourceKeys){var source=ledger.Get(old.Id,key.Day,key.Slot);known=checked(known+source.KnownTicks);gap|=source.HasGap;}
-                ledger=ledger.Put(next.Id,period.Day,new(Math.Max(known,target.KnownTicks),gap||target.HasGap),n.Id);
+                ledger=ledger.Put(next.Id,period.Day,GapAccounting.Carry(target,sourceKeys.Select(key=>ledger.Get(old.Id,key.Day,key.Slot))),n.Id);
             }
         }return ledger;
     }
