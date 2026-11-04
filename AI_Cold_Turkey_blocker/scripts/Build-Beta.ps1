@@ -35,6 +35,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $taskPayload 'scripts\Install-Beta.ps1'),$taskInstallText,(New-Object Text.UTF8Encoding($true)))
     Copy-Item -LiteralPath (Join-Path $taskRoot 'browser-extension\beta') -Destination (Join-Path $taskPayload 'Extension') -Recurse
     if($SelfTest){$taskUi=Start-Process -FilePath (Join-Path $taskPayload 'App\Aict.Beta.Desktop.exe') -ArgumentList '--self-test' -WindowStyle Hidden -PassThru;if(-not $taskUi.WaitForExit(60000) -or $taskUi.ExitCode -ne 0 -or -not(Test-Path -LiteralPath (Join-Path $taskPayload 'ui-self-test\result.json'))){throw 'Integrated UI self-test failed.'}}
+    if($SelfTest){$taskTray=Start-Process -FilePath (Join-Path $taskPayload 'App\Aict.Beta.Desktop.exe') -ArgumentList '--tray-self-test' -WindowStyle Hidden -PassThru;if(-not $taskTray.WaitForExit(60000) -or $taskTray.ExitCode -ne 0 -or -not(Test-Path -LiteralPath (Join-Path $taskPayload 'tray-self-test\result.json'))){throw 'Tray/activation self-test failed.'}}
 }finally {Pop-Location;foreach($taskKey in $taskSaved.Keys){[Environment]::SetEnvironmentVariable($taskKey,$taskSaved[$taskKey],'Process')}}
 [IO.File]::WriteAllText((Join-Path $taskRoot ('lab\build\'+$taskFamily+'\last-build.json')),(@{buildDirectory=$taskBuild;payloadDirectory=$taskPayload}|ConvertTo-Json),(New-Object Text.UTF8Encoding($false)))
 Write-Host ('Integrated beta candidate: '+$taskPayload+'. No host installation performed.')

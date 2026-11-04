@@ -32,12 +32,12 @@ public partial class MainWindow : Window {
     RuleGroup? editing;
     DateTimeOffset anchor;
     string originalTimedText="";
-    bool loading,polling,editingPending;
+    bool loading,polling,editingPending,uiReady;
     sealed record AppEntry(string Id,string Label) {public override string ToString()=>Label;}
     sealed record RuleEntry(RuleGroup Rule) {public override string ToString()=>Rule.Name+(Rule.Enabled?"":" · 停用");}
     public MainWindow(BetaConnection connection) {
         this.connection=connection;InitializeComponent();
-        Sites.TextChanged+=(_,_)=>{if(Sites.IsKeyboardFocusWithin && !string.IsNullOrWhiteSpace(Sites.Text) && SiteMode.SelectedIndex==0)SiteMode.SelectedIndex=1;};Loaded+=OnLoaded;timer.Tick+=async(_,_)=>await RefreshAsync();Closing+=(_,_)=>timer.Stop();
+        Sites.TextChanged+=(_,_)=>{if(Sites.IsKeyboardFocusWithin && !string.IsNullOrWhiteSpace(Sites.Text) && SiteMode.SelectedIndex==0)SiteMode.SelectedIndex=1;};Loaded+=OnLoaded;timer.Tick+=async(_,_)=>await RefreshAsync();Closed+=(_,_)=>timer.Stop();IsVisibleChanged+=async(_,_)=>{if(!IsVisible)timer.Stop();else if(uiReady){await RefreshAsync();if(IsVisible)timer.Start();}};
     }
     async void OnLoaded(object sender,RoutedEventArgs e) {
         try {
@@ -48,7 +48,7 @@ public partial class MainWindow : Window {
             string names=Path.Combine(connection.DataDirectory,"app-labels.json");
             try {if(!connection.IsService && File.Exists(names)) foreach(var pair in PolicyJson.Parse<Dictionary<string,string>>(File.ReadAllText(names))) appNames[pair.Key]=pair.Value;}
             catch(Exception ex) when(ex is IOException or System.Text.Json.JsonException) {Feedback.Text="应用显示名称未能读取；规则身份仍从后台读取。";}
-            await RefreshAsync();timer.Start();
+            await RefreshAsync();uiReady=true;if(IsVisible)timer.Start();
             string[] launch=Environment.GetCommandLineArgs();int draftArg=Array.IndexOf(launch,"--website-draft");
             if(draftArg>=0 && draftArg+1<launch.Length) {
                 string draftPath=Path.GetFullPath(launch[draftArg+1]);if(new FileInfo(draftPath).Length>131072)throw new ArgumentException("网站草稿过大。");

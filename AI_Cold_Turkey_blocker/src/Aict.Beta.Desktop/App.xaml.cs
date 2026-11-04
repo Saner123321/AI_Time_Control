@@ -7,14 +7,36 @@ using System.Text.Json;
 using Microsoft.Win32;
 namespace Aict.Beta.Desktop;
 public partial class App:Application {
-    protected override void OnStartup(StartupEventArgs e){base.OnStartup(e);try{
+    TrayController? tray;DesktopInstance? instance;BetaConnection? primaryConnection;
+    protected override async void OnStartup(StartupEventArgs e){base.OnStartup(e);bool test=e.Args.Any(a=>a.Contains("self-test",StringComparison.Ordinal));try{
         if(e.Args.SequenceEqual(new[]{"--build-info"})){Console.WriteLine(Aict.Core.PolicyJson.Serialize(new{hostTrial=Aict.Core.BuildMode.HostTrial,trialMinutes=Aict.Core.BuildMode.TrialMinutes}));Shutdown(0);return;}
-        if(e.Args.SequenceEqual(new[]{"--self-test"})){MainWindow=new MainWindow(new BetaConnection());MainWindow.Show();return;}
+        if(e.Args.SequenceEqual(new[]{"--self-test"})){MainWindow=new MainWindow(new BetaConnection()){ShowActivated=false};MainWindow.Show();return;}
+        if(e.Args.SequenceEqual(new[]{"--tray-self-test"})){ShutdownMode=ShutdownMode.OnExplicitShutdown;await TraySelfTest.Run();Shutdown(0);return;}
+        if(e.Args.Length==2&&e.Args[0]=="--activation-self-test-client"&&Guid.TryParseExact(e.Args[1],"N",out _)){
+            ShutdownMode=ShutdownMode.OnExplicitShutdown;using var client=new DesktopInstance("AICT-Desktop-Test-"+e.Args[1]);if(client.IsPrimary){Shutdown(2);return;}await client.Activate("show");Shutdown(0);return;
+        }
         Platform.Guard();if(e.Args.Contains("--guard-check"))throw new InvalidOperationException("Guard check expected physical host");
-        string? root=Platform.FindExisting();if(e.Args.Contains("--recovery")){MainWindow=new RecoveryWindow(root);MainWindow.Show();return;}if(root is not null && Platform.Running(root)){var connection=new BetaConnection(root);MainWindow=new MainWindow(connection);MainWindow.Show();if(e.Args.Contains("--uninstall"))new DiagnosticsWindow(connection){Owner=MainWindow}.ShowDialog();}
+        string? root=Platform.FindExisting();if(e.Args.Contains("--recovery")){MainWindow=new RecoveryWindow(root);MainWindow.Show();return;}
+        if(root is not null && Platform.Running(root))await OpenMainWindow(new BetaConnection(root),e.Args.Contains("--uninstall"));
         else{MainWindow=new SetupWindow(root);MainWindow.Show();}
-    }catch(Exception error){Environment.ExitCode=1;if(!e.Args.Contains("--guard-check"))MessageBox.Show(error.Message,"专注计划",MessageBoxButton.OK,MessageBoxImage.Information);Console.Error.WriteLine(error.Message);Shutdown(1);}}
+    }catch(Exception error){Environment.ExitCode=1;if(test)TraySelfTest.Failed(error);else if(!e.Args.Contains("--guard-check"))MessageBox.Show(error.Message,"专注计划",MessageBoxButton.OK,MessageBoxImage.Information);Console.Error.WriteLine(error.Message);Shutdown(1);}}
+    internal async Task OpenMainWindow(BetaConnection connection,bool uninstall=false){
+        if(connection.Root is {} root&&instance is null){
+            string name="AICT-Desktop-"+Path.GetFileName(root)+"-"+WindowsIdentity.GetCurrent().User!.Value;instance=new(name);
+            if(!instance.IsPrimary){try{await instance.Activate(uninstall?"uninstall":"show");}catch(Exception e){MessageBox.Show("已有界面正在运行，但暂时未能打开。请从右下角专注计划图标打开。\n"+e.Message,"专注计划");}Shutdown();return;}
+        }
+        var window=new MainWindow(connection);MainWindow=window;primaryConnection=connection;
+        try{tray=new(window,new NativeTraySurface(),()=>Shutdown());ShutdownMode=ShutdownMode.OnExplicitShutdown;
+            using var image=TrayIcon.Create();var bitmap=System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(image.Handle,Int32Rect.Empty,System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());bitmap.Freeze();window.Icon=bitmap;
+        }catch(Exception e){tray?.Dispose();tray=null;ShutdownMode=ShutdownMode.OnLastWindowClose;MessageBox.Show("托盘图标未能创建，窗口将保持普通关闭方式。后台封锁仍独立运行。\n"+e.Message,"专注计划");}
+        window.Show();instance?.Listen(command=>Dispatcher.InvokeAsync(()=>{if(tray is not null)tray.Open();else{window.Show();if(window.WindowState==WindowState.Minimized)window.WindowState=WindowState.Normal;window.Activate();}if(command=="uninstall")Dispatcher.BeginInvoke(new Action(ShowDiagnostics));}).Task);
+        if(uninstall)ShowDiagnostics();
+    }
+    void ShowDiagnostics(){if(primaryConnection is null||MainWindow is null)return;var existing=Windows.OfType<DiagnosticsWindow>().FirstOrDefault();if(existing is not null){existing.Activate();return;}new DiagnosticsWindow(primaryConnection){Owner=MainWindow}.ShowDialog();}
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e){base.OnSessionEnding(e);if(!e.Cancel){tray?.PrepareExit();Shutdown();}}
+    protected override void OnExit(ExitEventArgs e){tray?.PrepareExit();instance?.Dispose();base.OnExit(e);}
 }
+
 internal static class Platform {
     public static void Guard(){using var bios=Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\BIOS");if(!Aict.Core.BuildMode.HostTrial && (Convert.ToString(bios?.GetValue("SystemManufacturer"))?.Contains("VMware")!=true || Convert.ToString(bios?.GetValue("SystemProductName"))?.Contains("VMware")!=true))throw new InvalidOperationException("VMware guest required；此测试版不会在主机安装或修改封锁设置。");}
     public static string Package=>Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,".."));

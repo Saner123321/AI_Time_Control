@@ -77,14 +77,14 @@ public sealed class Authority:IDisposable {
         if(!clock.UserSessionPresent && !AgentHealthy)state=state with {Usage=state.Usage with {LastAccountedUntilUtc=state.Clock.EffectiveUtc}};
         else if(elapsed>0 && !suspended) {
             var focused=browsers.Values.Where(v=>clock.Uptime-v.Tick<=3500 && v.Sample.Browser==agent?.ForegroundBrowser && v.Sample.Focused && !v.Sample.Idle).OrderByDescending(v=>v.Tick).FirstOrDefault();
-            bool identityUnknown=agent is {IdentityPending:true,Locked:false,IdleSeconds:<60} && state.Policy.Groups.Any(g=>g.Enabled && g.ApplicationMode!=TargetMode.None && QuotaSchedules.HasQuota(g));
-            bool browserUnknown=AgentHealthy && agent is {Locked:false,IdleSeconds:<60,ForegroundBrowser:not null} && !browsers.Values.Any(v=>v.Sample.Browser==agent.ForegroundBrowser && clock.Uptime-v.Tick<=3500 && v.Sample.Focused) && state.Policy.Groups.Any(g=>g.Enabled && g.WebsiteMode!=TargetMode.None && QuotaSchedules.HasQuota(g));
+            bool identityUnknown=agent is {IdentityPending:true,Locked:false,IdleSeconds:<60} && state.Policy.Groups.Any(g=>g.Enabled && RuleEngine.HasApplicationScope(g) && QuotaSchedules.HasQuota(g));
+            bool browserUnknown=AgentHealthy && agent is {Locked:false,IdleSeconds:<60,ForegroundBrowser:not null} && !browsers.Values.Any(v=>v.Sample.Browser==agent.ForegroundBrowser && clock.Uptime-v.Tick<=3500 && v.Sample.Focused) && state.Policy.Groups.Any(g=>g.Enabled && RuleEngine.HasWebsiteScope(g) && QuotaSchedules.HasQuota(g));
             bool known=AgentHealthy && active<4000 && !identityUnknown && !browserUnknown;
             string reason=!AgentHealthy?"collector_heartbeat_stale":active>=4000?"service_iteration_delayed":identityUnknown?"application_identity_pending":browserUnknown?"browser_observation_missing":"observations_resumed";
             var context=new ActivityContext(agent?.ApplicationId,ActiveDomain()){WebsiteUrl=focused.Sample?.Url};
             var slice=new UsageSlice(start,TimeSpan.FromMilliseconds(Math.Min(elapsed,31L*86400000)),context,SessionLocked:agent?.Locked??false,IdleAtStart:TimeSpan.FromSeconds(agent?.IdleSeconds??0),ObservationKnown:known);
             // Do not censor a newly installed, still-empty workspace or its first short agent startup interval.
-            if(known || now-started>=5000 || state.Policy.Groups.Any(g=>g.Enabled&&QuotaSchedules.HasQuota(g))){Gap(!known,start,slice.Duration,reason);state=state with {Usage=RuleEngine.Account(state.Policy,state.Usage,slice)};recordActivity?.Invoke(new(state.Policy.TimeZoneId,slice,agent?.ApplicationName));}
+            if(known || now-started>=5000 || state.Policy.Groups.Any(RuleEngine.HasScopedQuota)){Gap(!known,start,slice.Duration,reason);state=state with {Usage=RuleEngine.Account(state.Policy,state.Usage,slice)};recordActivity?.Invoke(new(state.Policy.TimeZoneId,slice,agent?.ApplicationName));}
         }
         var result=ChangeQueue.TryApply(state,state.Clock.Reading,AgentHealthy);
         if(result.Status==ApplyStatus.Applied){Commit(result.Snapshot with {UninstallReady=result.UninstallAuthorized});log?.Invoke("ChangeApplied",new {uninstall=result.UninstallAuthorized});}

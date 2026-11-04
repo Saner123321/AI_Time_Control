@@ -7,7 +7,7 @@ public sealed record AgentSample(string? ApplicationId,bool Locked,double IdleSe
     public bool IdentityPending {get;init;}
     public AgentDiagnostics? Diagnostics {get;init;}
 }
-public sealed record AgentDiagnostics(int ProcessId,long Sequence,long UptimeMilliseconds,long LoopIntervalMilliseconds,long PreviousRoundTripMilliseconds,string IdentityStage,long IdentityPendingMilliseconds,long ForegroundMilliseconds=0);
+public sealed record AgentDiagnostics(int ProcessId,long Sequence,long UptimeMilliseconds,long LoopIntervalMilliseconds,long PreviousRoundTripMilliseconds,string IdentityStage,long IdentityPendingMilliseconds,long ForegroundMilliseconds=0,long GcPauseMilliseconds=0,long JournalFailures=0);
 public sealed record BrowserSample(string Browser,string ProfileId,string AppliedPlan,bool Focused,bool Idle,string? Domain,string? BlockedDomain=null) {
     [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] public string? Url {get;init;}
     [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)] public int PatternVersion {get;init;}
@@ -32,7 +32,7 @@ public sealed record Request {
         if(PendingId==Guid.Empty)throw new ArgumentException("无效修改编号。");
         if(Policy is {} p)PolicyValidation.Validate(p);Application?.Validate();
         if(Browser?.Url is {} url) {var uri=new Uri(WebsitePattern.WebUrl(url));if(Browser.Domain is null || PolicyValidation.Domain(uri.IdnHost)!=PolicyValidation.Domain(Browser.Domain))throw new ArgumentException("浏览器网址与域名不一致。");}
-        if(Agent is {} a) {if(!double.IsFinite(a.IdleSeconds) || a.IdleSeconds<0 || a.IdleSeconds>1e9 || a.ForegroundBrowser is not (null or "Edge" or "Chrome") || a.ApplicationName is {} name && (name.Length>200 || name.Any(char.IsControl) || name.IndexOfAny(['\\','/'])>=0))throw new ArgumentException("无效空闲状态。");if(a.ApplicationId is {} id)_=Aict.Enforcement.ApplicationPlanner.Digest(id);if(a.Diagnostics is {} d && (d.ProcessId<=0 || d.Sequence<0 || d.UptimeMilliseconds<0 || d.LoopIntervalMilliseconds<0 || d.PreviousRoundTripMilliseconds<0 || d.IdentityPendingMilliseconds<0 || d.ForegroundMilliseconds<0 || d.IdentityStage is not ("idle" or "queued" or "metadata" or "hash" or "unavailable")))throw new ArgumentException("无效采集诊断字段。");}
+        if(Agent is {} a) {if(!double.IsFinite(a.IdleSeconds) || a.IdleSeconds<0 || a.IdleSeconds>1e9 || a.ForegroundBrowser is not (null or "Edge" or "Chrome") || a.ApplicationName is {} name && (name.Length>200 || name.Any(char.IsControl) || name.IndexOfAny(['\\','/'])>=0))throw new ArgumentException("无效空闲状态。");if(a.ApplicationId is {} id)_=Aict.Enforcement.ApplicationPlanner.Digest(id);if(a.Diagnostics is {} d && (d.ProcessId<=0 || d.Sequence<0 || d.UptimeMilliseconds<0 || d.LoopIntervalMilliseconds<0 || d.PreviousRoundTripMilliseconds<0 || d.IdentityPendingMilliseconds<0 || d.ForegroundMilliseconds<0 || d.GcPauseMilliseconds<0 || d.JournalFailures<0 || d.IdentityStage is not ("idle" or "queued" or "metadata" or "hash" or "unavailable")))throw new ArgumentException("无效采集诊断字段。");}
         if(Browser is {} b) {if(b.Browser is not ("Edge" or "Chrome") || !Guid.TryParseExact(b.ProfileId,"N",out _) || b.AppliedPlan.Length>64 || b.AppliedPlan.Any(c=>!char.IsAsciiHexDigit(c)))throw new ArgumentException("无效浏览器状态。");if(b.Domain is {} d)_=PolicyValidation.Domain(d);if(b.BlockedDomain is {} denied)_=PolicyValidation.Domain(denied);}
     }
 }
@@ -46,7 +46,7 @@ public sealed record RuleActivation(Guid GroupId,string RuleName,ImmutableArray<
 public sealed record Status(PolicyConfiguration Policy,PendingChange? Pending,string EditToken,DateTimeOffset EffectiveUtc,bool ClockConsistent,string? ClockAnomaly,bool StorageHealthy,string? Fault,ImmutableArray<ApplicationTarget> Applications,ImmutableArray<UsageRow> Usage,Execution Execution,WebExecution Websites,bool UninstallReady,DateTimeOffset? TrialEndsUtc=null,bool TrialExpired=false,ImmutableArray<RuleActivation>? ActiveBlocks=null) {
     public bool TelemetryConnected=>Websites.ForegroundAgentHealthy;
     public string Mode=>BuildMode.HostTrial?(TrialEndsUtc is null?"HOST_CONTINUOUS":"HOST_TRIAL"):"VM_INTEGRATED_BETA";
-    public string Revision=>"telemetry-v11";
+    public string Revision=>"tray-v12";
     public bool SystemEnforcementActive=>Execution.Confirmed && (!Execution.Denied.IsEmpty || Execution.AllowGroups>0);
 }
 public sealed record WebGroup(Guid Id,TargetMode Mode,ImmutableArray<string> Domains,ImmutableArray<string> Exceptions,ImmutableArray<BlockReason> Reasons,string Name="",ImmutableArray<string>? Details=null);

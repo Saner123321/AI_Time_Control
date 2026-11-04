@@ -3,7 +3,6 @@ using System.Security.Principal;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Text;
-using System.Threading.Channels;
 using Aict.Beta;
 using Aict.Contracts;
 using Aict.Core;
@@ -14,11 +13,11 @@ try {if(args.SequenceEqual(new[]{"--build-info"})){Console.WriteLine(PolicyJson.
 static class Agent {
     static string Root=>Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,".."));
     static string runId="";static string Browser="";static bool userValidated;
-    static readonly Channel<string> journal=Channel.CreateBounded<string>(new BoundedChannelOptions(128){FullMode=BoundedChannelFullMode.DropOldest,SingleReader=true});
-    static int writerStarted;
+    sealed record DiagnosticEvent(DateTimeOffset AtUtc,long UptimeMs,int Pid,string Kind,object Details);
+    static readonly DeferredJournal<DiagnosticEvent> journal=new(WriteDiagnostic);
     internal static void TryLog(string message)=>Trace("AgentError",new{message=message.Length>400?message[..400]:message});
-    static void Trace(string kind,object detail){if(!userValidated)return;try{if(Interlocked.Exchange(ref writerStarted,1)==0)_=Task.Run(WriteJournal);journal.Writer.TryWrite(PolicyJson.Serialize(new{atUtc=DateTimeOffset.UtcNow,uptimeMs=Environment.TickCount64,pid=Environment.ProcessId,kind,details=detail}));}catch{}}
-    static async Task WriteJournal(){await foreach(string line in journal.Reader.ReadAllAsync())try{string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AICT");Directory.CreateDirectory(folder);string file=Path.Combine(folder,"beta-agent-"+runId+".log");if(File.Exists(file)&&new FileInfo(file).Length>=1048576)File.Move(file,file+".previous",true);await File.AppendAllTextAsync(file,line+Environment.NewLine);}catch{}}
+    static void Trace(string kind,object detail){if(!userValidated)return;try{journal.Report(new(DateTimeOffset.UtcNow,Environment.TickCount64,Environment.ProcessId,kind,detail));}catch{}}
+    static async Task WriteDiagnostic(DiagnosticEvent entry){string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AICT");Directory.CreateDirectory(folder);string file=Path.Combine(folder,"beta-agent-"+runId+".log");if(File.Exists(file)&&new FileInfo(file).Length>=1048576)File.Move(file,file+".previous",true);await File.AppendAllTextAsync(file,PolicyJson.Serialize(entry)+Environment.NewLine);}
     static async Task<Response> Call(Request request,Action<string>? phase=null){
         using var timeout=new CancellationTokenSource(3500);using var pipe=new NamedPipeClientStream(".","AICT-beta-"+runId,PipeDirection.InOut,PipeOptions.Asynchronous,TokenImpersonationLevel.Identification);
         phase?.Invoke("pipe-connect");await pipe.ConnectAsync(timeout.Token);phase?.Invoke("pipe-verify");Aict.Service.ServicePeer.Verify(pipe,"AICT-Beta-"+runId);
@@ -67,7 +66,7 @@ static class Agent {
                 string? applicationName=Path.GetFileName(path);if(applicationName?.Length>200)applicationName=applicationName[..200];
                 string? browser=Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() switch{"msedge"=>"Edge","chrome"=>"Chrome",_=>null};
                 var identity=path is null?new IdentityProbeSnapshot(null,!locked&&idle<60,"unavailable",0):probe.Sample(path);
-                var diagnostic=new AgentDiagnostics(Environment.ProcessId,++seq,begin,interval,roundTrip,identity.Stage,identity.PendingMilliseconds,watch.ElapsedMilliseconds);
+                var diagnostic=new AgentDiagnostics(Environment.ProcessId,++seq,begin,interval,roundTrip,identity.Stage,identity.PendingMilliseconds,watch.ElapsedMilliseconds,(long)GC.GetTotalPauseDuration().TotalMilliseconds,journal.FailedWrites);
                 if(diagnostic.ForegroundMilliseconds>250)Trace("CollectorForegroundSlow",new{durationMs=diagnostic.ForegroundMilliseconds});
                 if(interval>1800)Trace("CollectorCadenceDelayed",new{intervalMs=interval,previousRoundTripMs=roundTrip,diagnostic});
                 phase="heartbeat";watch.Restart();var response=await Call(new(){Command=Command.AgentPulse,Agent=new(identity.Id,locked,idle,browser,applicationName){IdentityPending=identity.Pending,Diagnostics=diagnostic}},p=>phase=p);roundTrip=watch.ElapsedMilliseconds;

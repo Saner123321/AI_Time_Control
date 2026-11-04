@@ -5,6 +5,9 @@ namespace Aict.Core;
 public static class RuleEngine {
     public static readonly TimeSpan IdleThreshold=TimeSpan.FromSeconds(60);
     public static readonly TimeSpan MaximumObservedSlice=TimeSpan.FromMinutes(5);
+    public static bool HasApplicationScope(RuleGroup g)=>g.ApplicationMode==TargetMode.AllowSelected || g.ApplicationMode==TargetMode.BlockSelected&&!g.ApplicationIds.IsEmpty;
+    public static bool HasWebsiteScope(RuleGroup g)=>g.WebsiteMode==TargetMode.AllowSelected || g.WebsiteMode==TargetMode.BlockSelected&&!g.WebsiteDomains.IsEmpty;
+    public static bool HasScopedQuota(RuleGroup g)=>g.Enabled&&QuotaSchedules.HasQuota(g)&&(HasApplicationScope(g)||HasWebsiteScope(g));
     public static DateOnly Day(PolicyConfiguration policy,DateTimeOffset utc) => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(utc,PolicyValidation.Zone(policy)).DateTime);
     public static bool WeeklyActive(WeeklyWindow window,DateTime local) {
         var today=(Weekdays)(1 << (((int)local.DayOfWeek+6)%7));
@@ -75,7 +78,7 @@ public static class RuleEngine {
         if(!slice.ObservationKnown || slice.Duration>MaximumObservedSlice) {
             // Charge only the intersecting unobserved time, once per rule/slot.
             // Keep it separate from measured use; a gap is no longer an entire-period lock.
-            if(until>begin) foreach(var g in policy.Groups.Where(g=>g.Enabled && QuotaSchedules.HasQuota(g)))
+            if(until>begin) foreach(var g in policy.Groups.Where(HasScopedQuota))
                 foreach(var quota in QuotaSchedules.Specs(g))foreach(var p in QuotaPeriods.Intersections(policy,quota,begin,until)){
                     var a=ledger.Get(g.Id,p.Day,quota.Id);ledger=ledger.Put(g.Id,p.Day,a with {HasGap=true,GapChargedTicks=checked(a.GapChargedTicks+(p.EndUtc-p.StartUtc).Ticks),GapChargeComplete=!a.UnresolvedGap},quota.Id);
                 }

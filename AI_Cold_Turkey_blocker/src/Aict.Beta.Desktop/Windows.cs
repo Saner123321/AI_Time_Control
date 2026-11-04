@@ -20,7 +20,7 @@ internal sealed class SetupWindow:Window {
         Ui.Text(p,BuildMode.HostTrial?"默认持续使用：规则按你设置的日程、额度及锁定条件执行，没有统一的30分钟截止时间。安装需要一次管理员确认，独立管理员故障恢复工具保留。":"目前仅安装到 VMware 虚拟机，安装需要管理员确认。");
         var trial=new CheckBox{Content="仅试用30分钟，到期保留并停用规则",Margin=new Thickness(0,8,0,12),Visibility=BuildMode.HostTrial&&(root is null||cleaned)?Visibility.Visible:Visibility.Collapsed};p.Children.Add(trial);
         var feedback=Ui.Text(p,"");var b=new Button{Content=cleaned?"重新安装（新规则，历史保留）":root is null?"安装并开始":"启动 / 修复后台",MinWidth=240,HorizontalAlignment=HorizontalAlignment.Left};p.Children.Add(b);
-        b.Click+=async(_,_)=>{b.IsEnabled=false;trial.IsEnabled=false;feedback.Text="正在处理安装与恢复，请稍候…";try{await Platform.Install(root is not null,root,newSession:cleaned,shortTrial:trial.IsChecked==true);string selected=Platform.FindExisting()??throw new IOException("安装未找到有效会话。");var window=new MainWindow(new BetaConnection(selected));Application.Current.MainWindow=window;window.Show();Close();}catch(Exception e){feedback.Text=e.Message;b.IsEnabled=true;trial.IsEnabled=true;}};
+        b.Click+=async(_,_)=>{b.IsEnabled=false;trial.IsEnabled=false;feedback.Text="正在处理安装与恢复，请稍候…";try{await Platform.Install(root is not null,root,newSession:cleaned,shortTrial:trial.IsChecked==true);string selected=Platform.FindExisting()??throw new IOException("安装未找到有效会话。");await ((App)Application.Current).OpenMainWindow(new BetaConnection(selected));Close();}catch(Exception e){feedback.Text=e.Message;b.IsEnabled=true;trial.IsEnabled=true;}};
         Ui.Button(p,"打开安装诊断位置",()=>Ui.Open("explorer.exe",root??Platform.Package));Ui.Text(p,"浏览器保护首次需要加载本包组件，安装后有图形引导。启用网站规则前请先完成这一步。");
     }
 }
