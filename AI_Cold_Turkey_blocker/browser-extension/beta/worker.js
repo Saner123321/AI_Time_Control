@@ -1,6 +1,8 @@
 import {denies, normalized} from './rules.js';
 import {blockingReasons} from './reasons.js';
+import {NetworkRecovery} from './network-recovery.js';
 import {navigationRules,FAST_ALLOW_ID} from './navigation.js';
+const recovery=new NetworkRecovery();let pendingSince=0,urgent=false;
 let port, pending=false, applied='', plan={groups:[],required:false}, profileId='', attemptedDomain=null, lastReadback=0;
 let operations=Promise.resolve(),nextGrant=1000000;const grants=new Map();
 async function checkedRules(next){
@@ -17,8 +19,9 @@ async function init(){
 function connect(){
   if(port)return;
   try {
-    port=chrome.runtime.connectNative('com.aict.beta');
-    port.onMessage.addListener(response=>serial(async()=>{
+    const connection=chrome.runtime.connectNative('com.aict.beta');port=connection;
+    connection.onMessage.addListener(response=>serial(async()=>{
+      if(port!==connection)return;
       try {
         if(response.ok && response.code==='UNINSTALLED'){
           const before=await chrome.declarativeNetRequest.getDynamicRules();await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds:before.map(r=>r.id)});
@@ -27,7 +30,7 @@ function connect(){
         if(!response.ok || !response.browserPlan)throw new Error(response.message || '后台没有返回计划');
         const next=response.browserPlan;
         if(next.fingerprint!==applied || Date.now()-lastReadback>5000){
-          const expected=await checkedRules(next),before=await chrome.declarativeNetRequest.getDynamicRules();
+          const expected=await checkedRules(next),before=await chrome.declarativeNetRequest.getDynamicRules();if(port!==connection)return;
           if(next.fingerprint!==applied)await clearGrants();
           if(normalized(before)!==normalized(expected))await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds:before.map(r=>r.id),addRules:expected});
           const actual=await chrome.declarativeNetRequest.getDynamicRules();
@@ -35,28 +38,37 @@ function connect(){
           plan=next;await blockExistingTabs();applied=next.fingerprint;lastReadback=Date.now();
         }
         await chrome.action.setBadgeText({text:next.required?'保护':''});
+        await recovery.recover(response.browserNetwork,plan,applied,chrome.tabs);
       }catch(e){applied='';await chrome.action.setBadgeText({text:'!'});console.error(e);}
-      finally{pending=false;}
+      finally{if(port===connection){pending=false;if(urgent)queueMicrotask(()=>void pulse());}}
     }));
-    port.onDisconnect.addListener(()=>{void chrome.runtime.lastError;port=null;pending=false;setTimeout(connect,1000);});
+    connection.onDisconnect.addListener(()=>{void chrome.runtime.lastError;if(port!==connection)return;port=null;pending=false;setTimeout(connect,1000);});
     pulse();
   }catch(e){port=null;pending=false;setTimeout(connect,1000);}
 }
 async function pulse(){
-  if(!port){connect();return;}if(pending || !profileId)return;
+  if(!port){connect();return;}
+  if(pending&&performance.now()-pendingSince>6000){const old=port;port=null;pending=false;try{old.disconnect();}catch{}setTimeout(connect,0);return;}
+  if(pending || !profileId)return;urgent=false;const connection=port;pending=true;pendingSince=performance.now();
   try {
     const window=await chrome.windows.getLastFocused();
     const tabs=await chrome.tabs.query({active:true,lastFocusedWindow:true});
     const idle=await chrome.idle.queryState(60);
     let domain=null,url=null;try {const u=new URL(tabs[0]?.url || '');if(['http:','https:'].includes(u.protocol) && !u.username && !u.password && u.href.length<=8192){domain=u.hostname;u.hash='';url=u.href;}}catch{}
-    pending=true;port.postMessage({browser:'Edge',profileId,appliedPlan:applied,focused:!!window.focused,idle:idle!=='active',domain,url,patternVersion:1,blockedDomain:attemptedDomain});attemptedDomain=null;
-  }catch(e){pending=false;}
+    if(port!==connection)return;connection.postMessage({browser:'Edge',profileId,appliedPlan:applied,focused:!!window.focused,idle:idle!=='active',domain,url,patternVersion:1,blockedDomain:attemptedDomain});attemptedDomain=null;
+  }catch(e){if(port===connection)pending=false;}
 }
 async function protect(tab){
   try {const u=new URL(tab.url || '');if(['http:','https:'].includes(u.protocol) && denies(plan,u.href)){attemptedDomain=u.hostname;await chrome.tabs.update(tab.id,{url:chrome.runtime.getURL('blocked.html')+'#'+encodeURIComponent(u.href)});}}catch{}
 }
 async function blockExistingTabs(){for(const tab of await chrome.tabs.query({}))await protect(tab);}
-chrome.tabs.onUpdated.addListener((id,change,tab)=>{if(change.url)void protect(tab);});
+chrome.tabs.onUpdated.addListener((id,change,tab)=>{if(change.url){recovery.navigated(id,change.url);void protect(tab);}});
+chrome.tabs.onRemoved?.addListener(id=>recovery.forget(id));
+function requestPulse(){urgent=true;void pulse();}
+chrome.windows.onFocusChanged?.addListener(requestPulse);
+chrome.tabs.onActivated?.addListener(requestPulse);
+chrome.webNavigation?.onErrorOccurred.addListener(e=>{recovery.error(e);requestPulse();});
+chrome.webNavigation?.onCompleted.addListener(e=>{if(e.frameId===0)recovery.forget(e.tabId);});
 chrome.action.onClicked.addListener(()=>chrome.tabs.create({url:chrome.runtime.getURL('blocked.html')}));
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(message?.type==='block-status' && typeof message.domain==='string' && sender.url?.split('#')[0]===chrome.runtime.getURL('blocked.html')){const known=!!port && !!applied;reply({known,blocked:denies(plan,message.domain),reasons:known?blockingReasons(plan,message.domain):[]});return false;}

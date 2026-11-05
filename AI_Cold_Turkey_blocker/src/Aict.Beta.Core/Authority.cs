@@ -7,7 +7,7 @@ public interface IClock {string BootId{get;}long Uptime{get;}long AwakeMilliseco
 public sealed class Authority:IDisposable {
     readonly StateRepository repository;readonly IClock clock;readonly HashSet<string> essentials;readonly Action<string,object>? log;readonly Action<ActivityFrame>? recordActivity;readonly SemaphoreSlim gate=new(1,1);
     EngineSnapshot state;long revision,lastTick,lastAwake,lastAgent=-100000,lastPersist;readonly long started;AgentSample? agent;bool reportedAgentHealthy;long? lossSince;DateTimeOffset? gapSince;long gapTicks,gapReportAt,lastSlowCommit;
-    readonly Dictionary<string,(BrowserSample Sample,long Tick)> browsers=[];
+    readonly Dictionary<string,(BrowserSample Sample,long Tick,long AwakeTick)> browsers=[];readonly BrowserReadinessTracker networkReadiness=new();ImmutableArray<BrowserNetworkState> networkStates=[];
     readonly DateTimeOffset? trialEndsUtc;readonly bool restrictApplicationAllowlist;readonly ActivityCounter[]? legacyHistory;
     bool TrialExpired=>trialEndsUtc is {} end && (clock.UtcNow>=end || state.Clock.EffectiveUtc>=end);
     string? storageFault,appFault,verifiedApp,webFault,publishedWeb;ImmutableArray<string> actualDenied=[];int actualAllow;bool firewallClosed,gateConfirmed;
@@ -94,12 +94,20 @@ public sealed class Authority:IDisposable {
         var app=Plans.Apps(state,AgentHealthy);var web=Plans.Web(state,AgentHealthy);
         var usage=state.Policy.Groups.SelectMany(g=>{var specs=QuotaSchedules.Specs(g).ToArray();if(specs.Length==0)return new[]{new UsageRow(g.Id,g.Name,state.Usage.Get(g.Id,RuleEngine.Day(state.Policy,state.Clock.EffectiveUtc)).ChargedTicks,null,false)};return specs.Select(q=>{var period=QuotaPeriods.At(state.Policy,q,state.Clock.EffectiveUtc);var u=state.Usage.Get(g.Id,period.Day,q.Id);return new UsageRow(g.Id,g.Name,u.ChargedTicks,q.Limit.Ticks,u.HasGap,period.Contains(state.Clock.EffectiveUtc),QuotaSchedules.Label(q),q.Id,u.KnownTicks,u.GapChargedTicks,u.GapEstimated,!u.UnresolvedGap);}).ToArray();}).ToImmutableArray();
         var explanations=state.Policy.Groups.Where(g=>g.Enabled).Select(g=>new RuleActivation(g.Id,g.Name,BlockExplanations.Describe(state.Policy,g,state.Usage,state.Clock.Reading,AgentHealthy))).Where(r=>!r.Details.IsEmpty).ToImmutableArray();
-        return new(state.Policy,state.Pending,Token,state.Clock.EffectiveUtc,state.Clock.Trusted,state.Clock.Anomaly,storageFault is null,storageFault,state.Applications,usage,new(app.Fingerprint,verifiedApp,actualDenied,actualAllow,appFault),new(web.Required,browsers.Values.Count(v=>clock.Uptime-v.Tick<=3500 && v.Sample.AppliedPlan==web.Fingerprint),AgentHealthy,publishedWeb,firewallClosed,webFault,gateConfirmed),state.UninstallReady,trialEndsUtc,TrialExpired,explanations);
+        return new(state.Policy,state.Pending,Token,state.Clock.EffectiveUtc,state.Clock.Trusted,state.Clock.Anomaly,storageFault is null,storageFault,state.Applications,usage,new(app.Fingerprint,verifiedApp,actualDenied,actualAllow,appFault),new(web.Required,browsers.Values.Count(v=>clock.Uptime-v.Tick<=3500 && v.Sample.AppliedPlan==web.Fingerprint),AgentHealthy,publishedWeb,firewallClosed,webFault,gateConfirmed,networkStates),state.UninstallReady,trialEndsUtc,TrialExpired,explanations);
     }
-    public async Task<(AppPlan Apps,WebPlan Web,ImmutableDictionary<string,bool> BrowserHealthy,bool Uninstall)> Desired(CancellationToken ct=default) {
-        await gate.WaitAsync(ct);try {Advance();var web=Plans.Web(state,AgentHealthy);var healthy=new Dictionary<string,bool>();foreach(string name in new[]{"Edge","Chrome"})healthy[name]=browsers.Values.Any(v=>v.Sample.Browser==name && clock.Uptime-v.Tick<=3500 && v.Sample.AppliedPlan==web.Fingerprint && (!AgentHealthy?v.Sample.Focused:agent?.ForegroundBrowser!=name || v.Sample.Focused));return(Plans.Apps(state,AgentHealthy),web,healthy.ToImmutableDictionary(),state.UninstallReady);}finally{gate.Release();}
+    public async Task<(AppPlan Apps,WebPlan Web,ImmutableDictionary<string,bool> BrowserHealthy,bool Uninstall,ImmutableDictionary<string,bool> NetworkReady,ImmutableDictionary<string,string> NetworkReasons)> Desired(CancellationToken ct=default) {
+        await gate.WaitAsync(ct);try {
+            Advance();var web=Plans.Web(state,AgentHealthy);var healthy=new Dictionary<string,bool>();var ready=new Dictionary<string,bool>();var reasons=new Dictionary<string,string>();
+            foreach(string name in new[]{"Edge","Chrome"}){
+                healthy[name]=browsers.Values.Any(v=>v.Sample.Browser==name && clock.Uptime-v.Tick<=3500 && v.Sample.AppliedPlan==web.Fingerprint && (!AgentHealthy?v.Sample.Focused:agent?.ForegroundBrowser!=name || v.Sample.Focused));
+                var decision=networkReadiness.Evaluate(name,web.Required,web.Fingerprint,browsers.Values.Where(v=>v.Sample.Browser==name).Select(v=>new BrowserProof(v.Sample.ProfileId,v.Sample.AppliedPlan,v.Sample.Focused,v.AwakeTick)),clock.AwakeMilliseconds,AgentHealthy,agent?.ForegroundBrowser);
+                ready[name]=decision.Ready;reasons[name]=decision.Reason;
+            }
+            return(Plans.Apps(state,AgentHealthy),web,healthy.ToImmutableDictionary(),state.UninstallReady,ready.ToImmutableDictionary(),reasons.ToImmutableDictionary());
+        }finally{gate.Release();}
     }
-    public async Task Observe(AppPlan plan,string? appError,string? webHash,bool closed,string? webError,CancellationToken ct=default,bool networkConfirmed=true) {await gate.WaitAsync(ct);try {appFault=appError;webFault=webError;publishedWeb=webHash;firewallClosed=closed;gateConfirmed=networkConfirmed;if(appError is null){verifiedApp=plan.Fingerprint;actualDenied=plan.Denied.Select(a=>a.Id).ToImmutableArray();actualAllow=plan.Whitelists.Length;}}finally{gate.Release();}}
+    public async Task Observe(AppPlan plan,string? appError,string? webHash,bool closed,string? webError,CancellationToken ct=default,bool networkConfirmed=true,ImmutableArray<BrowserNetworkState>? browserNetworks=null) {await gate.WaitAsync(ct);try {appFault=appError;webFault=webError;publishedWeb=webHash;firewallClosed=closed;gateConfirmed=networkConfirmed;if(browserNetworks is {} networks)networkStates=networkConfirmed?networks:networks.Select(n=>n with{Confirmed=false,Reason="network_readback_failed"}).ToImmutableArray();else if(!networkConfirmed)networkStates=networkStates.Select(n=>n with{Confirmed=false,Reason="network_readback_failed"}).ToImmutableArray();if(appError is null){verifiedApp=plan.Fingerprint;actualDenied=plan.Denied.Select(a=>a.Id).ToImmutableArray();actualAllow=plan.Whitelists.Length;}}finally{gate.Release();}}
     public async Task<Response> Handle(Request request,bool trustedAgent=false,CancellationToken ct=default) {
         var wait=Stopwatch.StartNew();await gate.WaitAsync(ct);try {
             if(wait.ElapsedMilliseconds>250)Trace("AuthorityQueueWait",new{command=request.Command.ToString(),durationMs=wait.ElapsedMilliseconds});
@@ -114,9 +122,9 @@ public sealed class Authority:IDisposable {
                 }
                 var b=request.Browser!;
                 if(state.Policy.Groups.Any(g=>g.Enabled && g.WebsiteMode!=TargetMode.None && g.WebsiteDomains.Concat(g.WebsiteExceptions).Any(p=>!WebsitePattern.IsDomain(p))) && b.PatternVersion!=1)b=b with {AppliedPlan=""};
-                browsers[b.Browser+":"+b.ProfileId]=(b,clock.Uptime);foreach(string key in browsers.Where(v=>clock.Uptime-v.Value.Tick>10000).Select(v=>v.Key).ToArray())browsers.Remove(key);
+                browsers[b.Browser+":"+b.ProfileId]=(b,clock.Uptime,clock.AwakeMilliseconds);foreach(string key in browsers.Where(v=>clock.AwakeMilliseconds-v.Value.AwakeTick>10000).Select(v=>v.Key).ToArray())browsers.Remove(key);
                 if(b.BlockedDomain is {} denied && Plans.Web(state,AgentHealthy).Groups.Any(g=>Plans.Denies(g,denied)))log?.Invoke("WebsiteNavigationDenied",new{browser=b.Browser,domain=PolicyValidation.Domain(denied)});
-                return new(true,"OK","浏览器计划",BrowserPlan:Plans.Web(state,AgentHealthy));
+                return new(true,"OK","浏览器计划",BrowserPlan:Plans.Web(state,AgentHealthy),BrowserNetwork:networkStates.FirstOrDefault(n=>n.Browser==b.Browser));
             }
             if(request.Command==Command.Status)return new(true,"OK","后台状态",Status());
             if(request.Command==Command.ExportJson)return new(true,"OK","规则与用量快照",Status(),PolicyJson.Serialize(state));

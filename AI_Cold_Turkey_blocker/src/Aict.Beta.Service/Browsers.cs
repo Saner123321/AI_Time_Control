@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using Microsoft.Win32;
 using Aict.Core;
+using Aict.Beta;
 namespace Aict.Beta.Service;
 internal sealed record OwnedRegistry(string Key,string Name,RegistryValueKind Kind,string Value);
 internal sealed class Browsers:IDisposable {
@@ -11,6 +12,7 @@ internal sealed class Browsers:IDisposable {
     long pathsChecked=-10000;
     readonly Dictionary<string,long> missingSince=[];readonly HashSet<string> closedOnce=[];
     public IReadOnlyDictionary<string,string> Paths=>paths;
+    readonly Dictionary<string,BrowserNetworkState> networkStates=[];public ImmutableArray<BrowserNetworkState> NetworkStates=>networkStates.Values.ToImmutableArray();
     public Browsers() {owned=File.Exists(journal)?PolicyJson.Parse<List<OwnedRegistry>>(File.ReadAllText(journal)):[];paths=FindPaths();string file=Path.Combine(Env.Root,"state","browser-paths.json");if(File.Exists(file)){var old=PolicyJson.Parse<Dictionary<string,string>>(File.ReadAllText(file));var known=FindPaths(false);foreach(var pair in old)if(known.TryGetValue(pair.Key,out var name) && name==pair.Value)paths[pair.Key]=pair.Value;else throw new InvalidDataException("Saved browser path scope changed");}Env.Save(file,paths);}
     public static Dictionary<string,string> FindPaths(bool existingOnly=true) {
         using var profile=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\"+Env.Config.ProbeSid);string user=Environment.ExpandEnvironmentVariables(Convert.ToString(profile?.GetValue("ProfileImagePath"))??"");
@@ -40,11 +42,23 @@ internal sealed class Browsers:IDisposable {
     }
     void RestoreModePolicies(){foreach(var item in owned.Where(o=>!o.Key.Contains(@"\NativeMessagingHosts\",StringComparison.OrdinalIgnoreCase))){ValidateOwnedModePolicy(item);using var key=Registry.Users.OpenSubKey(item.Key,true);if(key is null || !key.GetValueNames().Contains(item.Name,StringComparer.OrdinalIgnoreCase))continue;if(key.GetValueKind(item.Name)!=item.Kind || Convert.ToString(key.GetValue(item.Name))!=item.Value)throw new InvalidDataException("浏览器配置已被其他工具改变，未删除："+item.Name);key.DeleteValue(item.Name,false);key.Flush();}}
     static void ValidateOwnedModePolicy(OwnedRegistry item){string edge=Env.Config.ProbeSid+@"\Software\Policies\Microsoft\Edge",chrome=Env.Config.ProbeSid+@"\Software\Policies\Google\Chrome";bool key=item.Key.Equals(edge,StringComparison.OrdinalIgnoreCase)||item.Key.Equals(chrome,StringComparison.OrdinalIgnoreCase);bool mode=item.Name=="BrowserGuestModeEnabled"&&item.Value=="0" || item.Key.Equals(edge,StringComparison.OrdinalIgnoreCase)&&item.Name=="InPrivateModeAvailability"&&item.Value=="1" || item.Key.Equals(chrome,StringComparison.OrdinalIgnoreCase)&&item.Name=="IncognitoModeAvailability"&&item.Value=="1";if(!key || !mode || item.Kind!=RegistryValueKind.DWord)throw new InvalidDataException("Owned browser mode policy scope mismatch");}
-    public bool Reconcile(WebPlan plan,ImmutableDictionary<string,bool> health) {
+    public bool Reconcile(WebPlan plan,ImmutableDictionary<string,bool> health,ImmutableDictionary<string,string>? reasons=null) {
         if(Environment.TickCount64-pathsChecked>5000){pathsChecked=Environment.TickCount64;bool changed=false;foreach(var pair in FindPaths())if(!paths.ContainsKey(pair.Key)){paths[pair.Key]=pair.Value;changed=true;}if(changed)Env.Save(Path.Combine(Env.Root,"state","browser-paths.json"),paths);}
         if(plan.Required && paths.Count==0)throw new InvalidOperationException("没有检测到受管理的 Edge 或 Chrome。");
         var desired=paths.ToDictionary(p=>p.Key,p=>File.Exists(p.Key) && plan.Required && !health.GetValueOrDefault(p.Value),StringComparer.OrdinalIgnoreCase);
-        gate.Set(desired);return desired.Values.Any(v=>v);
+        var before=gate.ReadStates(desired.Keys);
+        try{gate.Set(desired);}catch{foreach(string name in new[]{"Edge","Chrome"}){var old=networkStates.GetValueOrDefault(name);networkStates[name]=new(name,false,old?.Restricted??true,"network_readback_failed",old?.Generation??0,old?.RestrictedSinceUtc,old?.ReleasedUtc);}throw;}
+        var now=DateTimeOffset.UtcNow;
+        foreach(string name in new[]{"Edge","Chrome"}){
+            bool blocked=desired.Any(p=>paths[p.Key]==name&&p.Value),wasBlocked=before.Any(p=>paths[p.Key]==name&&p.Value);var old=networkStates.GetValueOrDefault(name);
+            string reason=reasons?.GetValueOrDefault(name)??(!plan.Required?"not_required":blocked?"unconfirmed":"confirmed");long generation=old?.Generation??0;
+            bool changed=wasBlocked!=blocked;if(changed||old is null)generation++;
+            var started=blocked?(wasBlocked?old?.RestrictedSinceUtc??now:now):old?.RestrictedSinceUtc??(wasBlocked?now:null);
+            var released=wasBlocked&&!blocked?now:old?.ReleasedUtc;
+            var state=new BrowserNetworkState(name,true,blocked,reason,generation,started,released);networkStates[name]=state;
+            if(old is null||old.Restricted!=blocked||old.Reason!=reason||!old.Confirmed)Env.Log("BrowserNetworkGateChanged",new{browser=name,restricted=blocked,confirmed=true,reason,generation});
+        }
+        return desired.Values.Any(v=>v);
     }
     public async Task CloseLostBrowsers(WebPlan plan,ImmutableDictionary<string,bool> health,Terminator terminator,CancellationToken ct) {
         foreach(string name in new[]{"Edge","Chrome"}){

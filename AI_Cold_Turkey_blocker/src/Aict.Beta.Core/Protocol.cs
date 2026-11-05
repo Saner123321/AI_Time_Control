@@ -36,17 +36,18 @@ public sealed record Request {
         if(Browser is {} b) {if(b.Browser is not ("Edge" or "Chrome") || !Guid.TryParseExact(b.ProfileId,"N",out _) || b.AppliedPlan.Length>64 || b.AppliedPlan.Any(c=>!char.IsAsciiHexDigit(c)))throw new ArgumentException("无效浏览器状态。");if(b.Domain is {} d)_=PolicyValidation.Domain(d);if(b.BlockedDomain is {} denied)_=PolicyValidation.Domain(denied);}
     }
 }
-public sealed record Response(bool Ok,string Code,string Message,Status? Status=null,string? ExportText=null,WebPlan? BrowserPlan=null,ImmutableArray<ActivityCounter>? Activities=null);
+public sealed record Response(bool Ok,string Code,string Message,Status? Status=null,string? ExportText=null,WebPlan? BrowserPlan=null,ImmutableArray<ActivityCounter>? Activities=null,BrowserNetworkState? BrowserNetwork=null);
+public sealed record BrowserNetworkState(string Browser,bool Confirmed,bool Restricted,string Reason,long Generation,DateTimeOffset? RestrictedSinceUtc=null,DateTimeOffset? ReleasedUtc=null);
 public sealed record UsageRow(Guid GroupId,string Name,long UsedTicks,long? LimitTicks,bool HasGap,bool QuotaWindowActive=true,string QuotaWindowLabel="每日 00:00—24:00",Guid? QuotaSlotId=null,long KnownTicks=0,long GapChargedTicks=0,bool GapEstimated=false,bool GapChargeComplete=true);
 public sealed record Execution(string Desired,string? Verified,ImmutableArray<string> Denied,int AllowGroups,string? Fault) {
     public bool Confirmed=>Fault is null && Desired==Verified;
 }
-public sealed record WebExecution(bool Required,int ConnectedProfiles,bool ForegroundAgentHealthy,string? PublishedPlan,bool FirewallClosed,string? Fault,bool GateConfirmed=true);
+public sealed record WebExecution(bool Required,int ConnectedProfiles,bool ForegroundAgentHealthy,string? PublishedPlan,bool FirewallClosed,string? Fault,bool GateConfirmed=true,ImmutableArray<BrowserNetworkState>? Browsers=null);
 public sealed record RuleActivation(Guid GroupId,string RuleName,ImmutableArray<string> Details);
 public sealed record Status(PolicyConfiguration Policy,PendingChange? Pending,string EditToken,DateTimeOffset EffectiveUtc,bool ClockConsistent,string? ClockAnomaly,bool StorageHealthy,string? Fault,ImmutableArray<ApplicationTarget> Applications,ImmutableArray<UsageRow> Usage,Execution Execution,WebExecution Websites,bool UninstallReady,DateTimeOffset? TrialEndsUtc=null,bool TrialExpired=false,ImmutableArray<RuleActivation>? ActiveBlocks=null) {
     public bool TelemetryConnected=>Websites.ForegroundAgentHealthy;
     public string Mode=>BuildMode.HostTrial?(TrialEndsUtc is null?"HOST_CONTINUOUS":"HOST_TRIAL"):"VM_INTEGRATED_BETA";
-    public string Revision=>"tray-v12";
+    public string Revision=>"network-v13";
     public bool SystemEnforcementActive=>Execution.Confirmed && (!Execution.Denied.IsEmpty || Execution.AllowGroups>0);
 }
 public sealed record WebGroup(Guid Id,TargetMode Mode,ImmutableArray<string> Domains,ImmutableArray<string> Exceptions,ImmutableArray<BlockReason> Reasons,string Name="",ImmutableArray<string>? Details=null);

@@ -39,9 +39,13 @@ internal sealed class NetworkGate:IDisposable {
             var filter=new Filter{key=Key(path.ToLowerInvariant()+"/"+layer),display=new Display{name=Env.Name},flags=1,provider=providerPtr,layer=layer,sublayer=sublayer,conditionCount=2,conditions=conditions,action=new Wfp.Action{type=0x1001}};Check(Native.FwpmFilterAdd0(engine,ref filter,IntPtr.Zero,out _),"WFP scoped filter add");
         }finally{if(app!=IntPtr.Zero)Native.FwpmFreeMemory0(ref app);Marshal.FreeHGlobal(conditions);Marshal.FreeHGlobal(providerPtr);}
     }
+    public Dictionary<string,bool> ReadStates(IEnumerable<string> paths)=>paths.ToDictionary(p=>p,p=>Layers.Any(layer=>Exists(p,layer)),StringComparer.OrdinalIgnoreCase);
     public void Set(IReadOnlyDictionary<string,bool> pathBlocked) {
+        var observed=pathBlocked.SelectMany(p=>Layers.Select(layer=>(Path:p.Key,Layer:layer,Want:p.Value,Exists:Exists(p.Key,layer)))).ToArray();
+        var changed=observed.Where(p=>p.Want!=p.Exists).ToArray();if(changed.Length==0)return;
+
         Check(Native.FwpmTransactionBegin0(engine,0),"WFP transaction");bool committed=false;
-        try{foreach(var pair in pathBlocked)foreach(var layer in Layers){bool exists=Exists(pair.Key,layer);if(pair.Value && !exists)Add(pair.Key,layer);else if(!pair.Value && exists){Guid key=Key(pair.Key.ToLowerInvariant()+"/"+layer);Check(Native.FwpmFilterDeleteByKey0(engine,ref key),"WFP remove owned filter");}}Check(Native.FwpmTransactionCommit0(engine),"WFP commit");committed=true;}finally{if(!committed)Native.FwpmTransactionAbort0(engine);}
+        try{foreach(var item in changed){if(item.Want)Add(item.Path,item.Layer);else{Guid key=Key(item.Path.ToLowerInvariant()+"/"+item.Layer);Check(Native.FwpmFilterDeleteByKey0(engine,ref key),"WFP remove owned filter");}}Check(Native.FwpmTransactionCommit0(engine),"WFP commit");committed=true;}finally{if(!committed)Native.FwpmTransactionAbort0(engine);}
         foreach(var pair in pathBlocked)foreach(var layer in Layers)if(Exists(pair.Key,layer)!=pair.Value)throw new InvalidDataException("WFP readback mismatch");
     }
     public void RemoveObjects(IEnumerable<string> paths) {Set(paths.ToDictionary(p=>p,_=>false,StringComparer.OrdinalIgnoreCase));Guid sk=sublayer,pk=provider;Check(Native.FwpmSubLayerDeleteByKey0(engine,ref sk),"WFP sublayer cleanup");Check(Native.FwpmProviderDeleteByKey0(engine,ref pk),"WFP provider cleanup");}

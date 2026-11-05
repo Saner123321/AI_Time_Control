@@ -86,6 +86,7 @@ public partial class MainWindow : Window {
         var execution=status.Execution;var web=status.Websites;
         ExecutionText.Text=execution.Fault is {} problem?"应用执行异常："+(problem.Length>120?problem[..120]+"…（请导出诊断）":problem):execution.Confirmed?"应用策略已确认 · 拒绝 "+execution.Denied.Length+" / 白名单组 "+execution.AllowGroups:"应用策略：等待确认";
         ExecutionText.Text+=web.Required?"\n浏览器组件："+web.ConnectedProfiles+" 个配置文件已确认"+(web.GateConfirmed?(web.FirewallClosed?" · 未就绪的浏览器联网已限制":""):" · 网络执行状态未确认"):"\n网站保护：未启用，可先连接浏览器组件";
+        if(web.Browsers is {} networks)foreach(var n in networks)ExecutionText.Text+="\n"+n.Browser+"："+(!n.Confirmed?"网络状态待确认":n.Restricted?"网站保护未就绪，联网暂时受限":n.Reason.Contains("grace",StringComparison.Ordinal)?"连接短暂恢复中":"联网正常");
         if(web.Fault is {} webFault)ExecutionText.Text+="\n网站保护异常："+webFault;
         SubmitButton.IsEnabled=status.StorageHealthy && status.ClockConsistent && !status.TrialExpired;
         CancelButton.IsEnabled=status.StorageHealthy && status.Pending is not null;

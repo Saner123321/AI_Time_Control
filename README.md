@@ -1,6 +1,6 @@
 # AI_Time_Control
 
-Windows 11 自用强制封锁软件，源码位于 [AI_Cold_Turkey_blocker](AI_Cold_Turkey_blocker)。当前实现到 **v12：托盘入口与诊断修正**，关闭窗口保留托盘，重复启动唤回窗口；后台持续执行，修正空应用目标误计费并把诊断序列化移到后台。
+Windows 11 自用强制封锁软件，源码位于 [AI_Cold_Turkey_blocker](AI_Cold_Turkey_blocker)。当前实现到 **v13：网络保护修复**，减少短暂前台/心跳不同步触发的整浏览器断网，增加连接重连、分浏览器实际状态和有限错误页重试；更新后重载组件到0.5.0，保留持续运行和托盘。
 
 支持应用与网站封锁、每周计划、倒计时和循环、每日或分段额度、网址通配符、例外备注与分组、使用记录及导出。规则收紧可立即生效，放宽按已有等待时间生效；等待期间原规则继续运行。
 
@@ -20,10 +20,11 @@ node --test .\AI_Cold_Turkey_blocker\tests\extension-*.test.mjs
 powershell.exe -NoProfile -File .\AI_Cold_Turkey_blocker\tests\Test-ContinuousUse.ps1
 ```
 
-构建结果在 `AI_Cold_Turkey_blocker/lab/build/host-trial`。上述构建和自测不安装服务、不应用封锁策略；真实安装、浏览器加载与首次封锁由用户另行操作。构建所需的小型无害应用夹具已包含在 `build-fixtures`。需要新安装包时，再运行 `python .\AI_Cold_Turkey_blocker\scripts\package_beta.py --host`，输出独立的v12完整包；已有安装使用对应更新包。
+构建结果在 `AI_Cold_Turkey_blocker/lab/build/host-trial`。上述构建和自测不安装服务、不应用封锁策略；真实安装、浏览器加载与首次封锁由用户另行操作。构建所需的小型无害应用夹具已包含在 `build-fixtures`。需要新安装包时，再运行 `python .\AI_Cold_Turkey_blocker\scripts\package_beta.py --host`，输出独立的v13完整包；已有安装使用对应更新包。
 
 ## 内容与验证
 
+- [网络保护修复 v13](AI_Cold_Turkey_blocker/docs/NETWORK_V13.md)
 - [托盘与诊断修正 v12](AI_Cold_Turkey_blocker/docs/TRAY_V12.md)
 - [采集与失联扣时 v11](AI_Cold_Turkey_blocker/docs/TELEMETRY_V11.md)
 - [持续使用 v10](AI_Cold_Turkey_blocker/docs/CONTINUOUS_USE_V10.md)

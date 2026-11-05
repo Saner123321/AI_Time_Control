@@ -41,3 +41,25 @@ test('actual worker clears previous blocks, confirms readback, and never acknowl
     statusListener({type:'block-status',domain:'example.com'},{url:'chrome-extension://test/blocked.html'},r=>status=r);assert.equal(status.known,false);
   }finally{globalThis.chrome=saved.chrome;globalThis.setInterval=saved.setInterval;globalThis.setTimeout=saved.setTimeout;}
 });
+
+
+test('worker reconnects a hung native bridge and sends focus changes without waiting for the timer',async()=>{
+  const saved={chrome:globalThis.chrome,setInterval:globalThis.setInterval,setTimeout:globalThis.setTimeout,performance:globalThis.performance};
+  let pulse,focus,now=0;const timers=[],ports=[];
+  const event=()=>({addListener:f=>{event.last=f;}});
+  const newPort=()=>{const p={messages:[],disconnected:false,onMessage:{addListener:f=>p.reply=f},onDisconnect:{addListener:f=>p.closed=f},postMessage:m=>p.messages.push(m),disconnect:()=>{p.disconnected=true;p.closed();}};ports.push(p);return p;};
+  globalThis.performance={now:()=>now};globalThis.setInterval=f=>{pulse=f;return 1;};globalThis.setTimeout=(f,ms)=>{timers.push({f,ms});return timers.length;};
+  globalThis.chrome={storage:{local:{get:async()=>({profileId:'2'.repeat(32)}),set:async()=>{}}},runtime:{connectNative:newPort,getURL:p=>'chrome-extension://test/'+p,onMessage:event()},windows:{getLastFocused:async()=>({focused:true}),onFocusChanged:{addListener:f=>focus=f}},tabs:{query:async()=>[],onUpdated:event(),onActivated:event(),onRemoved:event()},idle:{queryState:async()=>'active'},declarativeNetRequest:{getDynamicRules:async()=>[],getSessionRules:async()=>[],updateSessionRules:async()=>{}},action:{setBadgeText:async()=>{},onClicked:event()},alarms:{create:()=>{},onAlarm:event()}};
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  try{
+    await import('../browser-extension/beta/worker.js?native-watchdog-test');await flush();
+    assert.equal(ports[0].messages.length,1);now=6001;await pulse();assert.equal(ports[0].disconnected,true);
+    const reconnect=timers.find(t=>t.ms===0);assert.ok(reconnect);reconnect.f();await flush();assert.equal(ports.length,2);assert.equal(ports[1].messages.length,1);
+    await ports[0].reply({ok:true,browserPlan:{fingerprint:'stale',required:false,groups:[]}});await pulse();assert.equal(ports[1].messages.length,1,'stale reply must not release the current request');
+    const empty={fingerprint:'empty',required:false,groups:[]};
+    // Same-plan reply after the initial rule readback avoids needing a native browser.
+    globalThis.chrome.declarativeNetRequest.isRegexSupported=async()=>({isSupported:true});
+    await ports[1].reply({ok:true,browserPlan:empty});focus();await flush();assert.equal(ports[1].messages.length,2);assert.equal(ports[1].messages.at(-1).appliedPlan,'empty');
+    focus();await ports[1].reply({ok:true,browserPlan:empty});await flush();assert.equal(ports[1].messages.length,3,'a focus event during a pending reply must not get lost');
+  }finally{Object.assign(globalThis,saved);}
+});
