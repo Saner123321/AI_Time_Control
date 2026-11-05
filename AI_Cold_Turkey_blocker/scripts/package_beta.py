@@ -52,6 +52,7 @@ def main():
     for path in (root / 'browser-extension/beta').glob('*'):
         if path.is_file():
             files['Sources/browser-extension/beta/' + path.name] = path
+    files['Sources/assets/focus.ico'] = root / 'assets/focus.ico'
     for name in ('Directory.Build.props', 'NuGet.config', 'global.json'):
         path = root / name
         if path.exists():
@@ -99,7 +100,7 @@ def main():
                 'target_sip_hash': target_hash, 'target_size': target_size,
                 'files': dict(sorted(hashes.items()))}
     if host:
-        contents['开始使用.txt']=('专注计划 · 持续使用\r\n\r\n双击“专注计划.exe”安装，之后使用桌面“专注计划”入口。初始为空规则，提交后按日程、额度和锁定条件持续执行，没有统一的30分钟截止时间。\r\n新安装可选择短测，但默认不勾选；已有安装修复保留原模式和数据库。\r\n首次连接浏览器组件后再启用网站规则。误封时使用“管理员恢复工具.exe”。详细说明见 README.md。\r\n').encode('utf-8-sig')
+        contents['开始使用.txt']=('专注计划 · 持续使用\r\n\r\n双击“专注计划.exe”安装，之后使用开始菜单“专注计划”入口。初始为空规则，提交后按日程、额度和锁定条件持续执行，没有统一的30分钟截止时间。\r\n新安装可选择短测，但默认不勾选；已有安装修复保留原模式和数据库。\r\n首次连接浏览器组件后再启用网站规则。误封时使用“管理员恢复工具.exe”。详细说明见 README.md。\r\n').encode('utf-8-sig')
         hashes['开始使用.txt']=hashlib.sha256(contents['开始使用.txt']).hexdigest()
         manifest['files']['开始使用.txt']=hashes['开始使用.txt']
     contents['MANIFEST.json'] = (json.dumps(manifest, ensure_ascii=False, indent=2) + '\n').encode('utf-8')

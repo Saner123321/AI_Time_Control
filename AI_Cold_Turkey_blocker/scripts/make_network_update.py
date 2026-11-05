@@ -23,6 +23,7 @@ def main():
     for folder in ('App','Agent','Service','Extension','scripts'):
         for p in (payload/folder).rglob('*'):
             if p.is_file():candidate[p.relative_to(payload).as_posix()]=p.read_bytes()
+    candidate['Sources/assets/focus.ico']=(r/'assets/focus.ico').read_bytes()
     candidate['BetaBridge.exe']=(payload/'BetaBridge.exe').read_bytes()
     for folder in ('src','tests/Aict.Core.Tests','browser-extension/beta'):
         for p in (r/folder).rglob('*'):

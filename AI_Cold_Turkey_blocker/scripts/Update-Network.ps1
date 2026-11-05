@@ -123,11 +123,11 @@ function Restore-UpdateTrialSafety {
 function New-UpdateShortcut {
     $taskShell=New-Object -ComObject WScript.Shell
     try {
-        $taskShortcutPath=Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) '专注计划.lnk'
+        $taskShortcutPath=Join-Path ([Environment]::GetFolderPath('Programs')) '专注计划.lnk'
         $taskShortcut=$taskShell.CreateShortcut($taskShortcutPath);$taskTarget=Join-Path $taskRoot 'App\Aict.Beta.Desktop.exe'
         if((Test-Path -LiteralPath $taskShortcutPath) -and $taskShortcut.TargetPath -ine $taskTarget){
-            $taskShortcutPath=Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) '专注计划（持续使用）.lnk';$taskShortcut=$taskShell.CreateShortcut($taskShortcutPath)
-            if((Test-Path -LiteralPath $taskShortcutPath) -and $taskShortcut.TargetPath -ine $taskTarget){throw 'Unrelated desktop shortcuts left unchanged.'}
+            $taskShortcutPath=Join-Path ([Environment]::GetFolderPath('Programs')) '专注计划（持续使用）.lnk';$taskShortcut=$taskShell.CreateShortcut($taskShortcutPath)
+            if((Test-Path -LiteralPath $taskShortcutPath) -and $taskShortcut.TargetPath -ine $taskTarget){throw 'Unrelated Start menu shortcuts left unchanged.'}
         }
         $taskShortcut.TargetPath=$taskTarget;$taskShortcut.WorkingDirectory=$taskRoot;$taskShortcut.Description='专注计划：持续执行日程、额度和锁定规则';$taskShortcut.Save()
     }finally{[Runtime.InteropServices.Marshal]::FinalReleaseComObject($taskShell)|Out-Null}

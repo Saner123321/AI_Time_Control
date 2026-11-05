@@ -28,7 +28,7 @@ Push-Location -LiteralPath $taskRoot
 try {
     $taskPublishDefines=@();if($HostTrial){$taskPublishDefines+=('-p:DefineConstants=HOST_TRIAL')}
     foreach($taskProject in @(@{Name='Aict.Beta.Service';Folder='Service'},@{Name='Aict.Beta.Agent';Folder='Agent'},@{Name='Aict.Beta.Desktop';Folder='App'})) { & (Join-Path $taskSdk.sdk_directory 'dotnet.exe') publish @taskPublishDefines (Join-Path $taskRoot ('src\'+$taskProject.Name+'\'+$taskProject.Name+'.csproj')) --configuration Release --runtime win-x64 --self-contained true --output (Join-Path $taskPayload $taskProject.Folder);if($LASTEXITCODE -ne 0){throw ('Beta publish failed: '+$taskProject.Name)} }
-    foreach($taskName in @('专注计划.exe','管理员恢复工具.exe')) { & "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll ('/out:'+(Join-Path $taskPayload $taskName)) (Join-Path $taskRoot 'lab\BetaEntry.cs');if($LASTEXITCODE -ne 0){throw 'Entry build failed.'} }
+    foreach($taskName in @('专注计划.exe','管理员恢复工具.exe')) { & "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /platform:x64 /optimize+ /r:System.Windows.Forms.dll ('/win32icon:'+(Join-Path $taskRoot 'assets\focus.ico')) ('/out:'+(Join-Path $taskPayload $taskName)) (Join-Path $taskRoot 'lab\BetaEntry.cs');if($LASTEXITCODE -ne 0){throw 'Entry build failed.'} }
     $null=New-Item -ItemType Directory -Path (Join-Path $taskPayload 'scripts') -Force
     $taskInstallText=[IO.File]::ReadAllText((Join-Path $taskRoot 'scripts\Install-Beta.ps1'))
     if($HostTrial){$taskInstallText=$taskInstallText.Replace('$taskHostBuild=$false','$taskHostBuild=$true')}
