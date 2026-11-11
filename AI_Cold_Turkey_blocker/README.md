@@ -1,6 +1,6 @@
 # AI Cold Turkey Blocker
 
-**内置浏览器人工观看：独立验证中。** `dist/AICT-manual-view-lab-v1/内置浏览器验证.exe` 只读识别前台网页，提供60秒屏幕遮挡与本地AI点击测试页。请求截图排除和点击穿透，不关闭网页、不修改ChatGPT设置、不接正式规则/额度；真实客户端识别与AI截图/点击仍待用户验证。见 [验证说明](docs/MANUAL_VIEWING_LAB_V1.md)。
+**内置浏览器人工观看：独立验证中。** `dist/AICT-manual-view-lab-v2/内置浏览器验证-v2.exe` 只读识别前台网页，提供60秒屏幕遮挡与本地AI点击测试页。v2修正嵌套文档读取，增加手动框选测试、失败原因和报告路径复制。请求截图排除和点击穿透，不关闭网页、不修改ChatGPT设置、不接正式规则/额度；真实客户端识别与AI截图/点击仍待用户验证。见 [验证说明](docs/MANUAL_VIEWING_LAB_V2.md)。
 
 **开始菜单图标补丁：** `dist/AICT-start-menu-icon-v1/添加开始菜单图标.exe` 为当前用户开始菜单入口设置与托盘一致的时钟图标，不创建桌面入口，不修改后台。后续构建内嵌多尺寸图标，新安装默认开始菜单入口。见 [开始菜单图标](docs/START_MENU_ICON.md)。
 
