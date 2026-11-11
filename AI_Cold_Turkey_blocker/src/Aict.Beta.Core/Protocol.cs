@@ -50,7 +50,7 @@ public sealed record RuleActivation(Guid GroupId,string RuleName,ImmutableArray<
 public sealed record Status(PolicyConfiguration Policy,PendingChange? Pending,string EditToken,DateTimeOffset EffectiveUtc,bool ClockConsistent,string? ClockAnomaly,bool StorageHealthy,string? Fault,ImmutableArray<ApplicationTarget> Applications,ImmutableArray<UsageRow> Usage,Execution Execution,WebExecution Websites,bool UninstallReady,DateTimeOffset? TrialEndsUtc=null,bool TrialExpired=false,ImmutableArray<RuleActivation>? ActiveBlocks=null) {
     public bool TelemetryConnected=>Websites.ForegroundAgentHealthy;
     public string Mode=>BuildMode.HostTrial?(TrialEndsUtc is null?"HOST_CONTINUOUS":"HOST_TRIAL"):"VM_INTEGRATED_BETA";
-    public string Revision=>"manual-view-v14";
+    public string Revision=>"startup-v15";
     public bool SystemEnforcementActive=>Execution.Confirmed && (!Execution.Denied.IsEmpty || Execution.AllowGroups>0);
 }
 public sealed record WebGroup(Guid Id,TargetMode Mode,ImmutableArray<string> Domains,ImmutableArray<string> Exceptions,ImmutableArray<BlockReason> Reasons,string Name="",ImmutableArray<string>? Details=null);

@@ -8,30 +8,39 @@ using Microsoft.Win32;
 namespace Aict.Beta.Desktop;
 public partial class App:Application {
     TrayController? tray;DesktopInstance? instance;BetaConnection? primaryConnection;
-    protected override async void OnStartup(StartupEventArgs e){base.OnStartup(e);bool test=e.Args.Any(a=>a.Contains("self-test",StringComparison.Ordinal));try{
+    protected override async void OnStartup(StartupEventArgs e){base.OnStartup(e);bool test=e.Args.Any(a=>a.Contains("self-test",StringComparison.Ordinal));bool startup=e.Args.SequenceEqual(new[]{"--startup"});try{
         if(e.Args.SequenceEqual(new[]{"--build-info"})){Console.WriteLine(Aict.Core.PolicyJson.Serialize(new{hostTrial=Aict.Core.BuildMode.HostTrial,trialMinutes=Aict.Core.BuildMode.TrialMinutes}));Shutdown(0);return;}
         if(e.Args.SequenceEqual(new[]{"--self-test"})){MainWindow=new MainWindow(new BetaConnection()){ShowActivated=false};MainWindow.Show();return;}
+        if(e.Args.SequenceEqual(new[]{"--startup-self-test"})){ShutdownMode=ShutdownMode.OnExplicitShutdown;StartupSelfTest.Run();Shutdown(0);return;}
         if(e.Args.SequenceEqual(new[]{"--tray-self-test"})){ShutdownMode=ShutdownMode.OnExplicitShutdown;await TraySelfTest.Run();Shutdown(0);return;}
         if(e.Args.Length==2&&e.Args[0]=="--activation-self-test-client"&&Guid.TryParseExact(e.Args[1],"N",out _)){
             ShutdownMode=ShutdownMode.OnExplicitShutdown;using var client=new DesktopInstance("AICT-Desktop-Test-"+e.Args[1]);if(client.IsPrimary){Shutdown(2);return;}await client.Activate("show");Shutdown(0);return;
         }
         Platform.Guard();if(e.Args.Contains("--guard-check"))throw new InvalidOperationException("Guard check expected physical host");
-        string? root=Platform.FindExisting();if(e.Args.Contains("--recovery")){MainWindow=new RecoveryWindow(root);MainWindow.Show();return;}
+        string? root=Platform.FindExisting();
+        if(startup){
+            ShutdownMode=ShutdownMode.OnExplicitShutdown;
+            if(root is null||Platform.Cleaned(root)||!Path.GetFullPath(Environment.ProcessPath!).Equals(Path.Combine(root,@"App\Aict.Beta.Desktop.exe"),StringComparison.OrdinalIgnoreCase)){Shutdown(0);return;}
+            var wait=Stopwatch.StartNew();while(!Platform.Running(root)&&wait.Elapsed<TimeSpan.FromSeconds(30)){if(Platform.Cleaned(root)){Shutdown(0);return;}await Task.Delay(1000);}
+            await OpenMainWindow(new BetaConnection(root),startInTray:true);return;
+        }
+        if(e.Args.Contains("--recovery")){MainWindow=new RecoveryWindow(root);MainWindow.Show();return;}
         if(root is not null && Platform.Running(root))await OpenMainWindow(new BetaConnection(root),e.Args.Contains("--uninstall"));
         else{MainWindow=new SetupWindow(root);MainWindow.Show();}
-    }catch(Exception error){Environment.ExitCode=1;if(test)TraySelfTest.Failed(error);else if(!e.Args.Contains("--guard-check"))MessageBox.Show(error.Message,"专注计划",MessageBoxButton.OK,MessageBoxImage.Information);Console.Error.WriteLine(error.Message);Shutdown(1);}}
-    internal async Task OpenMainWindow(BetaConnection connection,bool uninstall=false){
+    }catch(Exception error){Environment.ExitCode=1;if(test)TraySelfTest.Failed(error);else if(startup)LogStartupFailure(error);else if(!e.Args.Contains("--guard-check"))MessageBox.Show(error.Message,"专注计划",MessageBoxButton.OK,MessageBoxImage.Information);Console.Error.WriteLine(error.Message);Shutdown(1);}}
+    internal async Task OpenMainWindow(BetaConnection connection,bool uninstall=false,bool startInTray=false){
         if(connection.Root is {} root&&instance is null){
             string name="AICT-Desktop-"+Path.GetFileName(root)+"-"+WindowsIdentity.GetCurrent().User!.Value;instance=new(name);
-            if(!instance.IsPrimary){try{await instance.Activate(uninstall?"uninstall":"show");}catch(Exception e){MessageBox.Show("已有界面正在运行，但暂时未能打开。请从右下角专注计划图标打开。\n"+e.Message,"专注计划");}Shutdown();return;}
+            if(!instance.IsPrimary){if(startInTray){Shutdown(0);return;}try{await instance.Activate(uninstall?"uninstall":"show");}catch(Exception e){MessageBox.Show("已有界面正在运行，但暂时未能打开。请从右下角专注计划图标打开。\n"+e.Message,"专注计划");}Shutdown();return;}
         }
-        var window=new MainWindow(connection);MainWindow=window;primaryConnection=connection;
+        var window=new MainWindow(connection){ShowActivated=!startInTray};MainWindow=window;primaryConnection=connection;
         try{tray=new(window,new NativeTraySurface(),()=>Shutdown());ShutdownMode=ShutdownMode.OnExplicitShutdown;
             using var image=TrayIcon.Create();var bitmap=System.Windows.Interop.Imaging.CreateBitmapSourceFromHIcon(image.Handle,Int32Rect.Empty,System.Windows.Media.Imaging.BitmapSizeOptions.FromEmptyOptions());bitmap.Freeze();window.Icon=bitmap;
-        }catch(Exception e){tray?.Dispose();tray=null;ShutdownMode=ShutdownMode.OnLastWindowClose;MessageBox.Show("托盘图标未能创建，窗口将保持普通关闭方式。后台封锁仍独立运行。\n"+e.Message,"专注计划");}
-        window.Show();instance?.Listen(command=>Dispatcher.InvokeAsync(()=>{if(tray is not null)tray.Open();else{window.Show();if(window.WindowState==WindowState.Minimized)window.WindowState=WindowState.Normal;window.Activate();}if(command=="uninstall")Dispatcher.BeginInvoke(new Action(ShowDiagnostics));}).Task);
+        }catch(Exception e){tray?.Dispose();tray=null;ShutdownMode=ShutdownMode.OnLastWindowClose;if(startInTray)LogStartupFailure(e);else MessageBox.Show("托盘图标未能创建，窗口将保持普通关闭方式。后台封锁仍独立运行。\n"+e.Message,"专注计划");}
+        if(!startInTray||tray is null)window.Show();instance?.Listen(command=>Dispatcher.InvokeAsync(()=>{if(tray is not null)tray.Open();else{window.Show();if(window.WindowState==WindowState.Minimized)window.WindowState=WindowState.Normal;window.Activate();}if(command=="uninstall")Dispatcher.BeginInvoke(new Action(ShowDiagnostics));}).Task);
         if(uninstall)ShowDiagnostics();
     }
+    static void LogStartupFailure(Exception error){try{string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AICT");Directory.CreateDirectory(folder);string file=Path.Combine(folder,"desktop-startup.log");if(File.Exists(file)&&new FileInfo(file).Length>262144)File.Move(file,file+".previous",true);File.AppendAllText(file,DateTimeOffset.UtcNow.ToString("o")+" "+error.GetType().Name+": "+error.Message+Environment.NewLine);}catch{}}
     void ShowDiagnostics(){if(primaryConnection is null||MainWindow is null)return;var existing=Windows.OfType<DiagnosticsWindow>().FirstOrDefault();if(existing is not null){existing.Activate();return;}new DiagnosticsWindow(primaryConnection){Owner=MainWindow}.ShowDialog();}
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e){base.OnSessionEnding(e);if(!e.Cancel){tray?.PrepareExit();Shutdown();}}
     protected override void OnExit(ExitEventArgs e){tray?.PrepareExit();instance?.Dispose();base.OnExit(e);}

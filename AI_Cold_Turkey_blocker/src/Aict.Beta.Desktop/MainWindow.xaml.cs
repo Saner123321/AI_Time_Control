@@ -287,6 +287,7 @@ public partial class MainWindow : Window {
         } catch(Exception ex) {Feedback.Text="导出失败："+ex.Message;}
     }
     async void BrowserSetup(object sender,RoutedEventArgs e)=>await ShowBrowserSetup();
+    void SoftwareSettings(object sender,RoutedEventArgs e)=>new SettingsWindow(connection){Owner=this}.ShowDialog();
     async Task ShowBrowserSetup() {new BrowserWindow(connection){Owner=this}.ShowDialog();await RefreshAsync();}
     void Statistics(object sender,RoutedEventArgs e)=>new StatisticsWindow(connection){Owner=this}.ShowDialog();
     void Diagnostics(object sender,RoutedEventArgs e)=>new DiagnosticsWindow(connection){Owner=this}.ShowDialog();
