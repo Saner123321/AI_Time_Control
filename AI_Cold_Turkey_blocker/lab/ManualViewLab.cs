@@ -10,37 +10,6 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
-internal sealed class ViewMask:Form {
-    bool configured;
-    internal int PlaceCalls {get;private set;} internal int ConfigurationWrites {get;private set;}
-    internal int GeometryWrites {get;private set;} internal int ShowTransitions {get;private set;}
-    internal int HideTransitions {get;private set;} internal int PaintCalls {get;private set;}
-    [DllImport("user32.dll",SetLastError=true)] static extern bool SetWindowDisplayAffinity(IntPtr window,uint affinity);
-    [DllImport("user32.dll",SetLastError=true)] static extern bool GetWindowDisplayAffinity(IntPtr window,out uint affinity);
-    [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr window,uint key,byte alpha,uint flags);
-    [DllImport("user32.dll",EntryPoint="GetWindowLongW")] static extern int GetWindowLong(IntPtr window,int index);
-    protected override bool ShowWithoutActivation {get{return true;}}
-    protected override CreateParams CreateParams {get{var p=base.CreateParams;p.ExStyle|=0x08000000|0x00000020|0x00000080|0x00080000;return p;}}
-    internal ViewMask(){FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;StartPosition=FormStartPosition.Manual;BackColor=Color.FromArgb(20,43,47);SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.UserPaint,true);DoubleBuffered=true;}
-    internal bool CaptureExcluded {get{uint a;return GetWindowDisplayAffinity(Handle,out a)&&a==0x11;}}
-    internal bool InputPassThrough {get{return (GetWindowLong(Handle,-20)&0x08080020)==0x08080020;}}
-    internal void Place(Rectangle box){
-        PlaceCalls++;
-        if(Bounds!=box){Bounds=box;GeometryWrites++;}
-        // These writes can reset composition. Configure once per native handle,
-        // rather than resetting display affinity and repainting on every timer tick.
-        IntPtr window=Handle;
-        if(!configured){ConfigurationWrites++;if(!SetLayeredWindowAttributes(window,0,255,2)||!SetWindowDisplayAffinity(window,0x11)||!CaptureExcluded)throw new InvalidOperationException("当前系统没有确认截图排除，已停止遮挡验证。错误码："+Marshal.GetLastWin32Error());configured=true;}
-        if(!Visible){Show();ShowTransitions++;}
-    }
-    internal new void Hide(){if(!Visible)return;HideTransitions++;base.Hide();}
-    protected override void OnHandleDestroyed(EventArgs e){configured=false;base.OnHandleDestroyed(e);}
-    protected override void WndProc(ref Message m){if(m.Msg==0x0084){m.Result=new IntPtr(-1);return;}base.WndProc(ref m);}
-    protected override void OnPaint(PaintEventArgs e){PaintCalls++;base.OnPaint(e);var box=ClientRectangle;using(var font=new Font("Microsoft YaHei UI",16))using(var small=new Font("Microsoft YaHei UI",10)){
-        TextRenderer.DrawText(e.Graphics,"正在验证：只遮挡观看区域",font,new Rectangle(20,Math.Max(20,box.Height/2-45),box.Width-40,50),Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.WordBreak);
-        TextRenderer.DrawText(e.Graphics,"页面没有关闭或断网；切换到其他软件可撤掉遮挡",small,new Rectangle(20,Math.Max(75,box.Height/2+12),box.Width-40,50),Color.WhiteSmoke,TextFormatFlags.HorizontalCenter|TextFormatFlags.WordBreak);
-    }}
-}
 internal static class ManualViewLab {
     internal static JavaScriptSerializer Json(){return new JavaScriptSerializer{MaxJsonLength=1048576,RecursionLimit=25};}
     internal static bool CanMask(BrowserProbeResult r,string domain){return r!=null&&r.State=="committed_document_urls_observed"&&!r.Truncated&&r.DurationMs<=1200&&r.Pages.Any(p=>ManualBrowserProbe.Target(p.Url,domain));}

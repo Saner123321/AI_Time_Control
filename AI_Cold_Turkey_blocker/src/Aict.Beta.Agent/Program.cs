@@ -55,16 +55,17 @@ static class Agent {
     }
     static async Task Session(){
         using var probe=new BackgroundIdentityProbe(ResolveIdentity,o=>{if(o.ElapsedMilliseconds>250||o.ErrorType is not null)Trace("IdentityProbeResult",new{application=Path.GetFileName(o.Key),durationMs=o.ElapsedMilliseconds,errorType=o.ErrorType,errorCode=o.ErrorCode});});
-        using var timer=new PeriodicTimer(TimeSpan.FromSeconds(1));long seq=0,lastStart=Environment.TickCount64,roundTrip=0;bool failed=false;
+        using var timer=new PeriodicTimer(TimeSpan.FromSeconds(1));long seq=0,lastStart=Environment.TickCount64,roundTrip=0,viewerChecked=-10000;bool failed=false;
         Trace("CollectorSessionStarted",new{sessionId=Process.GetCurrentProcess().SessionId,cadenceMs=1000});
         do{
+            if(Environment.TickCount64-viewerChecked>=5000){viewerChecked=Environment.TickCount64;try{EnsureViewer();}catch(Exception e){Trace("ViewerLaunchFailed",new{errorType=e.GetType().Name});}}
             long begin=Environment.TickCount64,interval=Math.Max(0,begin-lastStart);lastStart=begin;string phase="foreground-state";var watch=Stopwatch.StartNew();
             try{
                 var input=new LastInput{Size=(uint)Marshal.SizeOf<LastInput>()};if(!GetLastInputInfo(ref input))throw new InvalidOperationException("Idle state unavailable");double idle=unchecked((uint)Environment.TickCount-input.Tick)/1000.0;
                 bool locked=true;IntPtr desktop=OpenInputDesktop(0,false,1);if(desktop!=IntPtr.Zero){try{var name=new StringBuilder(256);locked=!GetUserObjectInformationW(desktop,2,name,name.Capacity*2,out _)||!name.ToString().Equals("Default",StringComparison.OrdinalIgnoreCase);}finally{CloseDesktop(desktop);}}
                 string? path=null;GetWindowThreadProcessId(GetForegroundWindow(),out uint pid);if(pid>0)path=ImagePath(pid);
                 string? applicationName=Path.GetFileName(path);if(applicationName?.Length>200)applicationName=applicationName[..200];
-                string? browser=Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() switch{"msedge"=>"Edge","chrome"=>"Chrome",_=>null};
+                string? browser=Path.GetFileNameWithoutExtension(path)?.ToLowerInvariant() switch{"msedge"=>"Edge","chrome"=>"Chrome","chatgpt" when path!.StartsWith(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"WindowsApps","OpenAI."),StringComparison.OrdinalIgnoreCase)=>"ChatGPTIab",_=>null};
                 var identity=path is null?new IdentityProbeSnapshot(null,!locked&&idle<60,"unavailable",0):probe.Sample(path);
                 var diagnostic=new AgentDiagnostics(Environment.ProcessId,++seq,begin,interval,roundTrip,identity.Stage,identity.PendingMilliseconds,watch.ElapsedMilliseconds,(long)GC.GetTotalPauseDuration().TotalMilliseconds,journal.FailedWrites);
                 if(diagnostic.ForegroundMilliseconds>250)Trace("CollectorForegroundSlow",new{durationMs=diagnostic.ForegroundMilliseconds});
@@ -74,6 +75,11 @@ static class Agent {
                 if(failed||roundTrip>500)Trace(failed?"CollectorIpcRecovered":"CollectorIpcSlow",new{sequence=seq,roundTripMs=roundTrip});failed=false;
             }catch(Exception e){roundTrip=watch.ElapsedMilliseconds;Trace("CollectorSampleFailed",new{phase,sequence=seq,elapsedMs=roundTrip,errorType=e.GetType().Name,errorCode=e.HResult});failed=true;}
         }while(await timer.WaitForNextTickAsync());
+    }
+    static void EnsureViewer(){
+        string exe=Path.Combine(Root,@"Viewer\Aict.Beta.Viewer.exe");if(!File.Exists(exe))return;
+        foreach(var p in Process.GetProcessesByName("Aict.Beta.Viewer"))using(p)if(string.Equals(ImagePath((uint)p.Id),exe,StringComparison.OrdinalIgnoreCase))return;
+        using var started=Process.Start(new ProcessStartInfo(exe,"--session-viewer"){UseShellExecute=false,CreateNoWindow=true,WorkingDirectory=Root});Trace("ViewerLaunchRequested",new{processId=started?.Id});
     }
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] struct ProcessEntry {public uint Size,Usage,Pid;public UIntPtr Heap;public uint Module,Threads,Parent;public int Priority;public uint Flags;[MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)]public string Name;}
     [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags,uint pid);

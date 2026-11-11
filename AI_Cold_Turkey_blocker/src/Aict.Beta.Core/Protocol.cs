@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using Aict.Core;
 namespace Aict.Beta;
-public enum Command {Status,SubmitPolicy,CancelPending,RegisterApplication,ExportJson,ExportCsv,RequestUninstall,AgentPulse,BrowserPulse,GetActivities,ExportActivityCsv,UpdateWebsiteAnnotations}
+public enum Command {Status,SubmitPolicy,CancelPending,RegisterApplication,ExportJson,ExportCsv,RequestUninstall,AgentPulse,BrowserPulse,GetActivities,ExportActivityCsv,UpdateWebsiteAnnotations,ManualViewingPulse}
 public sealed record WebsiteAnnotationEdit(Guid GroupId,ImmutableArray<WebsiteExceptionDetail> Entries);
 public sealed record AgentSample(string? ApplicationId,bool Locked,double IdleSeconds,string? ForegroundBrowser=null,string? ApplicationName=null) {
     public bool IdentityPending {get;init;}
@@ -21,9 +21,12 @@ public sealed record Request {
     public ApplicationTarget? Application {get;init;}
     public AgentSample? Agent {get;init;}
     public BrowserSample? Browser {get;init;}
+    [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] public ManualViewingSample? ManualViewing {get;init;}
     [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] public WebsiteAnnotationEdit? Annotations {get;init;}
     public void Validate() {
         if(Version!=1 || !Enum.IsDefined(Command))throw new ArgumentException("协议版本或请求类型无效。");
+        if((Command==Command.ManualViewingPulse)!=(ManualViewing is not null))throw new ArgumentException("观看采集请求字段无效。");
+        if(ManualViewing is {} m){if(!Enum.IsDefined(m.Observation)||m.VisibleUrls.IsDefault||m.VisibleUrls.Any(u=>u is null)||m.VisibleUrls.Length>8||m.CaptureAgeMs<0||m.CaptureAgeMs>86400000||m.UiAgeMs<0||m.AppliedPlan is null||m.Diagnostic is null||m.AppliedPlan.Length>64||m.AppliedPlan.Any(c=>!char.IsAsciiHexDigit(c))||m.RenderedKeys.IsDefault||m.RenderedKeys.Length>8||m.RenderedKeys.Any(k=>k is null||k.Length!=64||k.Any(c=>!char.IsAsciiHexDigit(c)))||m.Diagnostic.Length>100||m.Diagnostic.Any(c=>!char.IsAsciiLetterOrDigit(c)&&c!='_'))throw new ArgumentException("观看采集数据无效。");foreach(string manualUrl in m.VisibleUrls)_=WebsitePattern.WebUrl(manualUrl);if(m.Observation!=ManualObservation.Confirmed&&!m.VisibleUrls.IsEmpty)throw new ArgumentException("未确认的网页不能作为网址样本。");}
         bool write=Command is Command.SubmitPolicy or Command.CancelPending or Command.RegisterApplication or Command.RequestUninstall or Command.UpdateWebsiteAnnotations;
         if((Command==Command.UpdateWebsiteAnnotations)!=(Annotations is not null))throw new ArgumentException("备注请求字段无效。");
         if(Annotations is {} annotations){if(annotations.GroupId==Guid.Empty)throw new ArgumentException("请选择规则。");ExceptionCatalog.ValidateEntries(annotations.Entries);}
@@ -32,22 +35,22 @@ public sealed record Request {
         if(PendingId==Guid.Empty)throw new ArgumentException("无效修改编号。");
         if(Policy is {} p)PolicyValidation.Validate(p);Application?.Validate();
         if(Browser?.Url is {} url) {var uri=new Uri(WebsitePattern.WebUrl(url));if(Browser.Domain is null || PolicyValidation.Domain(uri.IdnHost)!=PolicyValidation.Domain(Browser.Domain))throw new ArgumentException("浏览器网址与域名不一致。");}
-        if(Agent is {} a) {if(!double.IsFinite(a.IdleSeconds) || a.IdleSeconds<0 || a.IdleSeconds>1e9 || a.ForegroundBrowser is not (null or "Edge" or "Chrome") || a.ApplicationName is {} name && (name.Length>200 || name.Any(char.IsControl) || name.IndexOfAny(['\\','/'])>=0))throw new ArgumentException("无效空闲状态。");if(a.ApplicationId is {} id)_=Aict.Enforcement.ApplicationPlanner.Digest(id);if(a.Diagnostics is {} d && (d.ProcessId<=0 || d.Sequence<0 || d.UptimeMilliseconds<0 || d.LoopIntervalMilliseconds<0 || d.PreviousRoundTripMilliseconds<0 || d.IdentityPendingMilliseconds<0 || d.ForegroundMilliseconds<0 || d.GcPauseMilliseconds<0 || d.JournalFailures<0 || d.IdentityStage is not ("idle" or "queued" or "metadata" or "hash" or "unavailable")))throw new ArgumentException("无效采集诊断字段。");}
+        if(Agent is {} a) {if(!double.IsFinite(a.IdleSeconds) || a.IdleSeconds<0 || a.IdleSeconds>1e9 || a.ForegroundBrowser is not (null or "Edge" or "Chrome" or "ChatGPTIab") || a.ApplicationName is {} name && (name.Length>200 || name.Any(char.IsControl) || name.IndexOfAny(['\\','/'])>=0))throw new ArgumentException("无效空闲状态。");if(a.ApplicationId is {} id)_=Aict.Enforcement.ApplicationPlanner.Digest(id);if(a.Diagnostics is {} d && (d.ProcessId<=0 || d.Sequence<0 || d.UptimeMilliseconds<0 || d.LoopIntervalMilliseconds<0 || d.PreviousRoundTripMilliseconds<0 || d.IdentityPendingMilliseconds<0 || d.ForegroundMilliseconds<0 || d.GcPauseMilliseconds<0 || d.JournalFailures<0 || d.IdentityStage is not ("idle" or "queued" or "metadata" or "hash" or "unavailable")))throw new ArgumentException("无效采集诊断字段。");}
         if(Browser is {} b) {if(b.Browser is not ("Edge" or "Chrome") || !Guid.TryParseExact(b.ProfileId,"N",out _) || b.AppliedPlan.Length>64 || b.AppliedPlan.Any(c=>!char.IsAsciiHexDigit(c)))throw new ArgumentException("无效浏览器状态。");if(b.Domain is {} d)_=PolicyValidation.Domain(d);if(b.BlockedDomain is {} denied)_=PolicyValidation.Domain(denied);}
     }
 }
-public sealed record Response(bool Ok,string Code,string Message,Status? Status=null,string? ExportText=null,WebPlan? BrowserPlan=null,ImmutableArray<ActivityCounter>? Activities=null,BrowserNetworkState? BrowserNetwork=null);
+public sealed record Response(bool Ok,string Code,string Message,Status? Status=null,string? ExportText=null,WebPlan? BrowserPlan=null,ImmutableArray<ActivityCounter>? Activities=null,BrowserNetworkState? BrowserNetwork=null,ManualViewingPlan? ManualViewingPlan=null);
 public sealed record BrowserNetworkState(string Browser,bool Confirmed,bool Restricted,string Reason,long Generation,DateTimeOffset? RestrictedSinceUtc=null,DateTimeOffset? ReleasedUtc=null);
 public sealed record UsageRow(Guid GroupId,string Name,long UsedTicks,long? LimitTicks,bool HasGap,bool QuotaWindowActive=true,string QuotaWindowLabel="每日 00:00—24:00",Guid? QuotaSlotId=null,long KnownTicks=0,long GapChargedTicks=0,bool GapEstimated=false,bool GapChargeComplete=true);
 public sealed record Execution(string Desired,string? Verified,ImmutableArray<string> Denied,int AllowGroups,string? Fault) {
     public bool Confirmed=>Fault is null && Desired==Verified;
 }
-public sealed record WebExecution(bool Required,int ConnectedProfiles,bool ForegroundAgentHealthy,string? PublishedPlan,bool FirewallClosed,string? Fault,bool GateConfirmed=true,ImmutableArray<BrowserNetworkState>? Browsers=null);
+public sealed record WebExecution(bool Required,int ConnectedProfiles,bool ForegroundAgentHealthy,string? PublishedPlan,bool FirewallClosed,string? Fault,bool GateConfirmed=true,ImmutableArray<BrowserNetworkState>? Browsers=null,ManualViewingExecution? ManualViewing=null);
 public sealed record RuleActivation(Guid GroupId,string RuleName,ImmutableArray<string> Details);
 public sealed record Status(PolicyConfiguration Policy,PendingChange? Pending,string EditToken,DateTimeOffset EffectiveUtc,bool ClockConsistent,string? ClockAnomaly,bool StorageHealthy,string? Fault,ImmutableArray<ApplicationTarget> Applications,ImmutableArray<UsageRow> Usage,Execution Execution,WebExecution Websites,bool UninstallReady,DateTimeOffset? TrialEndsUtc=null,bool TrialExpired=false,ImmutableArray<RuleActivation>? ActiveBlocks=null) {
     public bool TelemetryConnected=>Websites.ForegroundAgentHealthy;
     public string Mode=>BuildMode.HostTrial?(TrialEndsUtc is null?"HOST_CONTINUOUS":"HOST_TRIAL"):"VM_INTEGRATED_BETA";
-    public string Revision=>"network-v13";
+    public string Revision=>"manual-view-v14";
     public bool SystemEnforcementActive=>Execution.Confirmed && (!Execution.Denied.IsEmpty || Execution.AllowGroups>0);
 }
 public sealed record WebGroup(Guid Id,TargetMode Mode,ImmutableArray<string> Domains,ImmutableArray<string> Exceptions,ImmutableArray<BlockReason> Reasons,string Name="",ImmutableArray<string>? Details=null);

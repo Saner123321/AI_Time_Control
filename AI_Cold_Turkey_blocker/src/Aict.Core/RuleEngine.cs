@@ -33,6 +33,7 @@ public static class RuleEngine {
             site=group.WebsiteMode==TargetMode.BlockSelected?WebsitePattern.In(group.WebsiteDomains,address):!WebsitePattern.In(group.WebsiteDomains,address);
             if(WebsitePattern.In(group.WebsiteExceptions,address)) site=false;
         }
+        if(!context.WebsiteUrls.IsDefaultOrEmpty&&group.WebsiteMode!=TargetMode.None)site|=context.WebsiteUrls.Any(address=>!WebsitePattern.In(group.WebsiteExceptions,address)&&(group.WebsiteMode==TargetMode.BlockSelected?WebsitePattern.In(group.WebsiteDomains,address):!WebsitePattern.In(group.WebsiteDomains,address)));
         return app || site;
     }
     static ImmutableArray<BlockReason> Reasons(PolicyConfiguration policy,RuleGroup group,UsageLedger usage,ClockReading clock,bool telemetryHealthy) {
@@ -78,7 +79,7 @@ public static class RuleEngine {
         if(!slice.ObservationKnown || slice.Duration>MaximumObservedSlice) {
             // Charge only the intersecting unobserved time, once per rule/slot.
             // Keep it separate from measured use; a gap is no longer an entire-period lock.
-            if(until>begin) foreach(var g in policy.Groups.Where(HasScopedQuota))
+            if(until>begin) foreach(var g in policy.Groups.Where(g=>HasScopedQuota(g)&&(!slice.GapScopeKnown||Matches(g,slice.Context,essentialApplications))))
                 foreach(var quota in QuotaSchedules.Specs(g))foreach(var p in QuotaPeriods.Intersections(policy,quota,begin,until)){
                     var a=ledger.Get(g.Id,p.Day,quota.Id);ledger=ledger.Put(g.Id,p.Day,a with {HasGap=true,GapChargedTicks=checked(a.GapChargedTicks+(p.EndUtc-p.StartUtc).Ticks),GapChargeComplete=!a.UnresolvedGap},quota.Id);
                 }

@@ -26,20 +26,20 @@ def main():
     payload.relative_to((root / ('lab/build/host-trial' if host else 'lab/build/beta')).resolve())
     ui = json.loads((payload / 'ui-self-test/result.json').read_text('utf-8-sig'))
     assert ui['passed'] and ui['systemWrites'] is False
-    output = root / ('dist/AICT-self-use-full-v13.zip' if host else 'dist/AICT-self-use-beta-v1.zip')
+    output = root / ('dist/AICT-self-use-full-v14.zip' if host else 'dist/AICT-self-use-beta-v1.zip')
     sidecar = output.with_suffix('.zip.sha256')
     if output.exists() or sidecar.exists():
         raise FileExistsError('Frozen release exists; choose a new version')
 
     files = {}
-    for folder in ('Service', 'Agent', 'App', 'Extension', 'Targets', 'scripts'):
+    for folder in ('Service', 'Agent', 'Viewer', 'App', 'Extension', 'Targets', 'scripts'):
         for path in sorted((payload / folder).rglob('*')):
             if path.is_file():
                 assert not path.is_symlink()
                 files[path.relative_to(payload).as_posix()] = path
     for name in ('BetaBridge.exe', 'MovedTarget.exe', '专注计划.exe', '管理员恢复工具.exe'):
         files[name] = payload / name
-    files['README.md'] = root / ('docs/NETWORK_V13.md' if host else 'docs/INTEGRATED_BETA.md')
+    files['README.md'] = root / ('docs/MANUAL_VIEWING_V14.md' if host else 'docs/INTEGRATED_BETA.md')
     files['集中测试清单.md'] = root / ('docs/HOST_TEST_CHECKLIST.md' if host else 'docs/BETA_TEST_CHECKLIST.md')
     for project in sorted((root / 'src').iterdir()):
         if not project.is_dir():
@@ -59,6 +59,8 @@ def main():
             files['Sources/' + name] = path
     for name in ('BetaBridge.cs', 'BetaPolicyXml.cs', 'BetaNative.cs', 'BetaEntry.cs'):
         files['Sources/lab/' + name] = root / 'lab' / name
+    for name in ('ManualBrowserProbe.cs','ManualViewMask.cs','ManualViewConfirmation.cs'):
+        files['Sources/lab/'+name] = root/'lab'/name
     for name in ('FixtureIdentity.cs', 'AuthenticodeHash.cs'):
         files['Sources/lab/' + name] = payload / name
     for path in (root / 'tests/Aict.Core.Tests').glob('*'):
@@ -91,7 +93,7 @@ def main():
     key_hash = hashlib.sha256(base64.b64decode(extension['key'])).hexdigest()[:32]
     extension_id = ''.join(chr(ord('a') + int(x, 16)) for x in key_hash)
     assert extension_id == (payload / 'Extension/extension-id.txt').read_text().strip()
-    manifest = {'kind': 'AICT_INTEGRATED_BETA_V1', 'version': '0.10.0' if host else '0.1.0',
+    manifest = {'kind': 'AICT_INTEGRATED_BETA_V1', 'version': '0.11.0' if host else '0.1.0',
                 'created_utc': datetime.now(timezone.utc).isoformat(), 'vmware_only': not host, 'host_trial':False, 'continuous_use_default':host, 'optional_short_trial':host, 'trial_minutes':None,
                 'normal_entry': '专注计划.exe', 'requires_command_line': False,
                 'extension_id': extension_id, 'extension_deployment': 'UNPACKED_SELF_USE' if host else 'UNPACKED_VM_TEST_ONLY',
@@ -126,7 +128,7 @@ def main():
                'manifest_sha256': all_hashes['MANIFEST.json'],
                'windows_integration_acceptance': 'NOT_RUN'}
     if host:
-        extracted=root/'dist/AICT-self-use-full-v13'
+        extracted=root/'dist/AICT-self-use-full-v14'
         if extracted.exists():raise FileExistsError('Host trial folder already exists')
         with zipfile.ZipFile(output) as archive:archive.extractall(extracted)
         assert all(digest(extracted/name)==expected for name,expected in all_hashes.items())

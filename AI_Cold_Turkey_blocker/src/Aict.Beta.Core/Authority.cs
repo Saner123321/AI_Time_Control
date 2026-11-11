@@ -8,6 +8,7 @@ public sealed class Authority:IDisposable {
     readonly StateRepository repository;readonly IClock clock;readonly HashSet<string> essentials;readonly Action<string,object>? log;readonly Action<ActivityFrame>? recordActivity;readonly SemaphoreSlim gate=new(1,1);
     EngineSnapshot state;long revision,lastTick,lastAwake,lastAgent=-100000,lastPersist;readonly long started;AgentSample? agent;bool reportedAgentHealthy;long? lossSince;DateTimeOffset? gapSince;long gapTicks,gapReportAt,lastSlowCommit;
     readonly Dictionary<string,(BrowserSample Sample,long Tick,long AwakeTick)> browsers=[];readonly BrowserReadinessTracker networkReadiness=new();ImmutableArray<BrowserNetworkState> networkStates=[];
+    ManualViewingSample? manual;long manualPulseAt=-100000,manualProofAt=-100000;ImmutableArray<string> manualUrls=[];bool manualProtected;string manualDiagnostic="";
     readonly DateTimeOffset? trialEndsUtc;readonly bool restrictApplicationAllowlist;readonly ActivityCounter[]? legacyHistory;
     bool TrialExpired=>trialEndsUtc is {} end && (clock.UtcNow>=end || state.Clock.EffectiveUtc>=end);
     string? storageFault,appFault,verifiedApp,webFault,publishedWeb;ImmutableArray<string> actualDenied=[];int actualAllow;bool firewallClosed,gateConfirmed;
@@ -61,6 +62,14 @@ public sealed class Authority:IDisposable {
         var focused=browsers.Values.Where(v=>clock.Uptime-v.Tick<=3500 && v.Sample.Browser==agent.ForegroundBrowser && v.Sample.Focused && !v.Sample.Idle).OrderByDescending(v=>v.Tick).FirstOrDefault();
         return focused.Sample?.Domain;
     }
+    ImmutableArray<string> ManualUrls()=>clock.AwakeMilliseconds>=manualProofAt&&clock.AwakeMilliseconds-manualProofAt<=2500?manualUrls:[];
+    ManualViewingExecution ManualExecution(){
+        bool connected=clock.Uptime-manualPulseAt<=4000&&manual is {UiAgeMs:<3000};
+        var urls=ManualUrls();var plan=ManualViewingRules.Decide(Plans.Web(state,AgentHealthy),state.Policy,urls);
+        var wanted=plan.Pages.Where(p=>p.Denied).Select(p=>p.Key).Order().ToArray();
+        bool applied=connected&&manual!.AppliedPlan==plan.Fingerprint&&manual.RenderedKeys.Order().SequenceEqual(wanted);
+        return new(connected,manual?.Observation.ToString()??"Waiting",urls.Length,wanted.Length,manual?.RenderedKeys.Length??0,applied,manualProtected,!connected?"观看保护尚未连接":manual!.Diagnostic=="mask_configuration_failed"?"遮挡窗口未确认，请导出诊断":manual!.Observation==ManualObservation.Unavailable?"内置网页暂未识别："+manual.Diagnostic:null);
+    }
     void Advance() {
         long now=clock.Uptime,awake=clock.AwakeMilliseconds,elapsed=now-lastTick,active=Math.Max(0,awake-lastAwake);lastTick=now;lastAwake=awake;
         if(elapsed<0){state=state with {Clock=state.Clock with {Trusted=false,Anomaly="UPTIME_REGRESSED"}};return;}
@@ -78,11 +87,14 @@ public sealed class Authority:IDisposable {
         else if(elapsed>0 && !suspended) {
             var focused=browsers.Values.Where(v=>clock.Uptime-v.Tick<=3500 && v.Sample.Browser==agent?.ForegroundBrowser && v.Sample.Focused && !v.Sample.Idle).OrderByDescending(v=>v.Tick).FirstOrDefault();
             bool identityUnknown=agent is {IdentityPending:true,Locked:false,IdleSeconds:<60} && state.Policy.Groups.Any(g=>g.Enabled && RuleEngine.HasApplicationScope(g) && QuotaSchedules.HasQuota(g));
-            bool browserUnknown=AgentHealthy && agent is {Locked:false,IdleSeconds:<60,ForegroundBrowser:not null} && !browsers.Values.Any(v=>v.Sample.Browser==agent.ForegroundBrowser && clock.Uptime-v.Tick<=3500 && v.Sample.Focused) && state.Policy.Groups.Any(g=>g.Enabled && RuleEngine.HasWebsiteScope(g) && QuotaSchedules.HasQuota(g));
-            bool known=AgentHealthy && active<4000 && !identityUnknown && !browserUnknown;
-            string reason=!AgentHealthy?"collector_heartbeat_stale":active>=4000?"service_iteration_delayed":identityUnknown?"application_identity_pending":browserUnknown?"browser_observation_missing":"observations_resumed";
-            var context=new ActivityContext(agent?.ApplicationId,ActiveDomain()){WebsiteUrl=focused.Sample?.Url};
-            var slice=new UsageSlice(start,TimeSpan.FromMilliseconds(Math.Min(elapsed,31L*86400000)),context,SessionLocked:agent?.Locked??false,IdleAtStart:TimeSpan.FromSeconds(agent?.IdleSeconds??0),ObservationKnown:known);
+            bool browserUnknown=agent?.ForegroundBrowser!="ChatGPTIab" && AgentHealthy && agent is {Locked:false,IdleSeconds:<60,ForegroundBrowser:not null} && !browsers.Values.Any(v=>v.Sample.Browser==agent.ForegroundBrowser && clock.Uptime-v.Tick<=3500 && v.Sample.Focused) && state.Policy.Groups.Any(g=>g.Enabled && RuleEngine.HasWebsiteScope(g) && QuotaSchedules.HasQuota(g));
+            bool iab=AgentHealthy&&agent is {ForegroundBrowser:"ChatGPTIab",Locked:false};
+            var visible=iab?ManualUrls():[];
+            bool manualUnknown=iab&&!visible.IsEmpty&&(manual?.Observation!=ManualObservation.Confirmed||clock.Uptime-manualPulseAt>3500);
+            bool known=AgentHealthy && active<4000 && !identityUnknown && !browserUnknown&&!manualUnknown;
+            string reason=!AgentHealthy?"collector_heartbeat_stale":active>=4000?"service_iteration_delayed":identityUnknown?"application_identity_pending":browserUnknown?"browser_observation_missing":manualUnknown?"manual_view_observation_missing":"observations_resumed";
+            var context=new ActivityContext(agent?.ApplicationId,iab?null:ActiveDomain()){WebsiteUrl=iab?null:focused.Sample?.Url,WebsiteUrls=visible.IsEmpty?default:visible};
+            var slice=new UsageSlice(start,TimeSpan.FromMilliseconds(Math.Min(elapsed,31L*86400000)),context,SessionLocked:agent?.Locked??false,IdleAtStart:!visible.IsEmpty?TimeSpan.Zero:TimeSpan.FromSeconds(agent?.IdleSeconds??0),ObservationKnown:known){GapScopeKnown=manualUnknown&&AgentHealthy&&active<4000&&!identityUnknown};
             // Do not censor a newly installed, still-empty workspace or its first short agent startup interval.
             if(known || now-started>=5000 || state.Policy.Groups.Any(RuleEngine.HasScopedQuota)){Gap(!known,start,slice.Duration,reason);state=state with {Usage=RuleEngine.Account(state.Policy,state.Usage,slice)};recordActivity?.Invoke(new(state.Policy.TimeZoneId,slice,agent?.ApplicationName));}
         }
@@ -94,7 +106,7 @@ public sealed class Authority:IDisposable {
         var app=Plans.Apps(state,AgentHealthy);var web=Plans.Web(state,AgentHealthy);
         var usage=state.Policy.Groups.SelectMany(g=>{var specs=QuotaSchedules.Specs(g).ToArray();if(specs.Length==0)return new[]{new UsageRow(g.Id,g.Name,state.Usage.Get(g.Id,RuleEngine.Day(state.Policy,state.Clock.EffectiveUtc)).ChargedTicks,null,false)};return specs.Select(q=>{var period=QuotaPeriods.At(state.Policy,q,state.Clock.EffectiveUtc);var u=state.Usage.Get(g.Id,period.Day,q.Id);return new UsageRow(g.Id,g.Name,u.ChargedTicks,q.Limit.Ticks,u.HasGap,period.Contains(state.Clock.EffectiveUtc),QuotaSchedules.Label(q),q.Id,u.KnownTicks,u.GapChargedTicks,u.GapEstimated,!u.UnresolvedGap);}).ToArray();}).ToImmutableArray();
         var explanations=state.Policy.Groups.Where(g=>g.Enabled).Select(g=>new RuleActivation(g.Id,g.Name,BlockExplanations.Describe(state.Policy,g,state.Usage,state.Clock.Reading,AgentHealthy))).Where(r=>!r.Details.IsEmpty).ToImmutableArray();
-        return new(state.Policy,state.Pending,Token,state.Clock.EffectiveUtc,state.Clock.Trusted,state.Clock.Anomaly,storageFault is null,storageFault,state.Applications,usage,new(app.Fingerprint,verifiedApp,actualDenied,actualAllow,appFault),new(web.Required,browsers.Values.Count(v=>clock.Uptime-v.Tick<=3500 && v.Sample.AppliedPlan==web.Fingerprint),AgentHealthy,publishedWeb,firewallClosed,webFault,gateConfirmed,networkStates),state.UninstallReady,trialEndsUtc,TrialExpired,explanations);
+        return new(state.Policy,state.Pending,Token,state.Clock.EffectiveUtc,state.Clock.Trusted,state.Clock.Anomaly,storageFault is null,storageFault,state.Applications,usage,new(app.Fingerprint,verifiedApp,actualDenied,actualAllow,appFault),new(web.Required,browsers.Values.Count(v=>clock.Uptime-v.Tick<=3500 && v.Sample.AppliedPlan==web.Fingerprint),AgentHealthy,publishedWeb,firewallClosed,webFault,gateConfirmed,networkStates,ManualExecution()),state.UninstallReady,trialEndsUtc,TrialExpired,explanations);
     }
     public async Task<(AppPlan Apps,WebPlan Web,ImmutableDictionary<string,bool> BrowserHealthy,bool Uninstall,ImmutableDictionary<string,bool> NetworkReady,ImmutableDictionary<string,string> NetworkReasons)> Desired(CancellationToken ct=default) {
         await gate.WaitAsync(ct);try {
@@ -108,10 +120,20 @@ public sealed class Authority:IDisposable {
         }finally{gate.Release();}
     }
     public async Task Observe(AppPlan plan,string? appError,string? webHash,bool closed,string? webError,CancellationToken ct=default,bool networkConfirmed=true,ImmutableArray<BrowserNetworkState>? browserNetworks=null) {await gate.WaitAsync(ct);try {appFault=appError;webFault=webError;publishedWeb=webHash;firewallClosed=closed;gateConfirmed=networkConfirmed;if(browserNetworks is {} networks)networkStates=networkConfirmed?networks:networks.Select(n=>n with{Confirmed=false,Reason="network_readback_failed"}).ToImmutableArray();else if(!networkConfirmed)networkStates=networkStates.Select(n=>n with{Confirmed=false,Reason="network_readback_failed"}).ToImmutableArray();if(appError is null){verifiedApp=plan.Fingerprint;actualDenied=plan.Denied.Select(a=>a.Id).ToImmutableArray();actualAllow=plan.Whitelists.Length;}}finally{gate.Release();}}
-    public async Task<Response> Handle(Request request,bool trustedAgent=false,CancellationToken ct=default) {
+    public async Task<Response> Handle(Request request,bool trustedAgent=false,CancellationToken ct=default,bool trustedViewer=false,bool viewerProtected=false) {
         var wait=Stopwatch.StartNew();await gate.WaitAsync(ct);try {
             if(wait.ElapsedMilliseconds>250)Trace("AuthorityQueueWait",new{command=request.Command.ToString(),durationMs=wait.ElapsedMilliseconds});
             request.Validate();Advance();
+            if(request.Command==Command.ManualViewingPulse){
+                if(!trustedViewer)return new(false,"UNAUTHORIZED","该接口仅供受保护的观看采集组件使用。");
+                manual=request.ManualViewing!;manualPulseAt=clock.Uptime;manualProtected=viewerProtected;
+                if(manual.Observation==ManualObservation.Confirmed&&manual.CaptureAgeMs<=2500){manualUrls=manual.VisibleUrls.Select(WebsitePattern.WebUrl).Distinct().ToImmutableArray();manualProofAt=clock.AwakeMilliseconds-manual.CaptureAgeMs;}
+                else if(manual.Observation==ManualObservation.OutsideClient){manualUrls=[];manualProofAt=-100000;}
+                string diagnostic=manual.Observation+"/"+manual.Diagnostic+"/"+viewerProtected;
+                if(diagnostic!=manualDiagnostic){manualDiagnostic=diagnostic;Trace("ManualViewingState",new{observation=manual.Observation.ToString(),reason=manual.Diagnostic,processProtected=viewerProtected,visiblePages=manual.VisibleUrls.Length});}
+                var plan=ManualViewingRules.Decide(Plans.Web(state,AgentHealthy),state.Policy,ManualUrls(),state.UninstallReady);
+                return new(true,"OK","人工观看计划",ManualViewingPlan:plan);
+            }
             if(request.Command is Command.AgentPulse or Command.BrowserPulse) {
                 if(!trustedAgent)return new(false,"UNAUTHORIZED","该接口仅供受保护的采集组件使用。");
                 if(request.Agent is {} a){

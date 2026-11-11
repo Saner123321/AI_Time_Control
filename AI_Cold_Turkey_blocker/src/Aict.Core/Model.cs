@@ -46,6 +46,7 @@ public sealed record PolicyConfiguration {
 }
 public sealed record ActivityContext(string? ApplicationId=null, string? WebsiteDomain=null) {
     [JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingNull)] public string? WebsiteUrl {get;init;}
+    [JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingDefault)] public ImmutableArray<string> WebsiteUrls {get;init;}
 }
 public sealed record DailyUsage(long KnownTicks=0, bool HasGap=false) {
     [JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingDefault)] public long GapChargedTicks {get;init;}
@@ -62,7 +63,9 @@ public sealed record UsageLedger {
     public static string Key(Guid group, DateOnly day,Guid? slot=null) => $"{group:N}/{day:yyyy-MM-dd}"+(slot is {} id?$"/{id:N}":"");
 }
 public sealed record UsageSlice(DateTimeOffset StartUtc, TimeSpan Duration, ActivityContext Context,
-    bool Foreground=true, bool SessionLocked=false, bool Suspended=false, TimeSpan IdleAtStart=default, bool ObservationKnown=true);
+    bool Foreground=true, bool SessionLocked=false, bool Suspended=false, TimeSpan IdleAtStart=default, bool ObservationKnown=true) {
+    [JsonIgnore(Condition=JsonIgnoreCondition.WhenWritingDefault)] public bool GapScopeKnown {get;init;}
+}
 public sealed record GroupDecision(Guid GroupId, ImmutableArray<BlockReason> Reasons, TimeSpan? QuotaRemaining) {
     public bool Blocked => !Reasons.IsEmpty;
 }

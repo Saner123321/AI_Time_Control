@@ -89,7 +89,7 @@ namespace AictServicePolicyLab {
         static string Desired(){var value=Read(Join(@"state\desired-plan.json"));Require((string)value["runId"]==RunId,"Desired run mismatch");string raw=(string)value["planJson"];var plan=BetaPolicyXml.Parse(raw);var essential=ProtectedIdentities();Require(!plan.Denied.Any(app=>essential.Contains(app.Id)),"Essential executable cannot be denied");return raw;}
         static HashSet<string> ProtectedIdentities(){
             var ids=new HashSet<string>(StringComparer.Ordinal);string windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-            foreach(string path in new[]{Join(@"Service\Aict.Beta.Service.exe"),Join("BetaBridge.exe"),Join(@"App\Aict.Beta.Desktop.exe"),Join(@"Agent\Aict.Beta.Agent.exe"),Path.Combine(windows,"explorer.exe"),Path.Combine(windows,@"System32\cmd.exe"),Path.Combine(windows,@"System32\WindowsPowerShell\v1.0\powershell.exe"),Path.Combine(windows,@"System32\winlogon.exe"),Path.Combine(windows,@"System32\userinit.exe"),Path.Combine(windows,@"System32\taskmgr.exe")}){
+            foreach(string path in new[]{Join(@"Service\Aict.Beta.Service.exe"),Join("BetaBridge.exe"),Join(@"App\Aict.Beta.Desktop.exe"),Join(@"Agent\Aict.Beta.Agent.exe"),Join(@"Viewer\Aict.Beta.Viewer.exe"),Path.Combine(windows,"explorer.exe"),Path.Combine(windows,@"System32\cmd.exe"),Path.Combine(windows,@"System32\WindowsPowerShell\v1.0\powershell.exe"),Path.Combine(windows,@"System32\winlogon.exe"),Path.Combine(windows,@"System32\userinit.exe"),Path.Combine(windows,@"System32\taskmgr.exe")}){
                 if(File.Exists(path)){string hash=AuthenticodeHash.Compute(path);ids.Add("authenticode:sha256:"+hash.Substring(2));}
             }
             return ids;
