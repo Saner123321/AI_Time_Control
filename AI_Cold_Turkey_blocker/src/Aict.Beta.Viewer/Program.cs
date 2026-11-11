@@ -26,7 +26,7 @@ internal static class ViewerProgram {
     [STAThread] static int Main(string[] args){
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         try{
-            if(args.SequenceEqual(new[]{"--build-info"})){Console.Write(PolicyJson.Serialize(new{hostTrial=BuildMode.HostTrial,revision="background-v16"}));return 0;}
+            if(args.SequenceEqual(new[]{"--build-info"})){Console.Write(PolicyJson.Serialize(new{hostTrial=BuildMode.HostTrial,revision="mask-v17"}));return 0;}
             if(args.Length==2&&args[0]=="--self-test"){ViewerSelfTest.Run(args[1]);return 0;}
             if(args.SequenceEqual(new[]{"--security-fixture-wait"})){Thread.Sleep(15000);return 0;}
             if(args.SequenceEqual(new[]{"--fixture-probe"})){Console.Write(ViewerSelfTest.FixtureJson());return 0;}
@@ -98,7 +98,7 @@ internal sealed class ViewerContext:ApplicationContext {
             for(int i=0;i<masks.Count;i++){
                 if(i<wanted.Count){var target=wanted[i];masks[i].Message("当前网页已受限制",target.Text+"\nAI仍可读取和操作页面；切换到其他网页或软件可继续工作。");masks[i].Place(target.Page.Rectangle);shown.Add(ManualViewingRules.Key(target.Page.Url));}else masks[i].Hide();
             }
-        }catch{success=false;foreach(var mask in masks)mask.Hide();for(int i=masks.Count-1;i>=0;i--)if(masks[i].IsDisposed)masks.RemoveAt(i);}
+        }catch{success=false;shown.Clear();foreach(var mask in masks)mask.Hide();for(int i=masks.Count-1;i>=0;i--)if(masks[i].IsDisposed)masks.RemoveAt(i);}
         lock(gate){uiFault=!success;rendered=shown.ToImmutable();applied=success&&current!=null&&now-received<=4000?current.Fingerprint:"";}
     }
     protected override void Dispose(bool disposing){if(disposing){stop.Cancel();timer.Stop();timer.Dispose();foreach(var mask in masks)mask.Dispose();stop.Dispose();}base.Dispose(disposing);}

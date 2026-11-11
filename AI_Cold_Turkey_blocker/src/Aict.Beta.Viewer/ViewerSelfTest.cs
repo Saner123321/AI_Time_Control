@@ -13,6 +13,7 @@ using Aict.Core;
 internal static class ViewerSelfTest {
     [DllImport("user32.dll")] static extern IntPtr GetThreadDpiAwarenessContext();
     [DllImport("user32.dll")] static extern bool AreDpiAwarenessContextsEqual(IntPtr first,IntPtr second);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr w,IntPtr after,int x,int y,int width,int height,uint flags);
     static void Check(bool value,string name){if(!value)throw new InvalidOperationException(name);}
     internal static string FixtureJson(){Application.EnableVisualStyles();using var fixture=new Fixture();fixture.Show();Application.DoEvents();return PolicyJson.Serialize(ManualBrowserProbe.ReadWindow(fixture.Handle,true,true));}
     internal static void Run(string folder){
@@ -23,6 +24,9 @@ internal static class ViewerSelfTest {
         IntPtr foreground=ManualBrowserProbe.GetForegroundWindow();using(var mask=new ViewMask()){
             var box=new Rectangle(-30000,-30000,600,300);mask.Message("当前网页已受限制",p.Pages[0].Explanation);mask.Place(box);Application.DoEvents();
             for(int i=0;i<100;i++)mask.Place(box);Check(mask.CaptureExcluded&&mask.InputPassThrough&&mask.ConfigurationWrites==1&&mask.ShowTransitions==1,"stable native mask");cases.Add("stable_native_mask_capture_and_passthrough");
+            Check(mask.PresentedAt(box),"native mask not visible/topmost/positioned");cases.Add("native_visible_topmost_geometry_readback");
+            int repairs=mask.PresentationRepairs;for(int i=0;i<100;i++)mask.Place(box);Check(mask.PresentationRepairs==repairs&&mask.ConfigurationWrites==1,"healthy presentation must not mutate native state");cases.Add("stable_readback_does_not_repeat_native_writes");
+            Check(SetWindowPos(mask.Handle,new IntPtr(-2),0,0,0,0,0x13)&&!mask.PresentedAt(box),"fixture demotion failed");mask.Place(box);Check(mask.PresentedAt(box)&&mask.PresentationRepairs==repairs+1&&mask.ConfigurationWrites==1,"native demotion not repaired");cases.Add("external_native_demotion_repaired_without_affinity_reset");
             mask.Hide();Check(foreground==ManualBrowserProbe.GetForegroundWindow(),"focus changed");cases.Add("does_not_activate_user_window");
         }
         using(var fixture=new Fixture()){

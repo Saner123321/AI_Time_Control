@@ -67,7 +67,7 @@ public sealed class Authority:IDisposable {
         bool connected=clock.Uptime-manualPulseAt<=4000&&manual is {UiAgeMs:<3000};
         var urls=ManualUrls();var plan=ManualViewingRules.Decide(Plans.Web(state,AgentHealthy),state.Policy,urls);
         var wanted=plan.Pages.Where(p=>p.Denied).Select(p=>p.Key).Order().ToArray();
-        bool applied=connected&&manual!.AppliedPlan==plan.Fingerprint&&manual.RenderedKeys.Order().SequenceEqual(wanted);
+        bool applied=connected&&manual!.Observation!=ManualObservation.Unavailable&&manual.AppliedPlan==plan.Fingerprint&&manual.RenderedKeys.Order().SequenceEqual(wanted);
         return new(connected,manual?.Observation.ToString()??"Waiting",urls.Length,wanted.Length,manual?.RenderedKeys.Length??0,applied,manualProtected,!connected?"观看保护尚未连接":manual!.Diagnostic=="mask_configuration_failed"?"遮挡窗口未确认，请导出诊断":manual!.Observation==ManualObservation.Unavailable?"内置网页暂未识别："+manual.Diagnostic:null);
     }
     void Advance() {

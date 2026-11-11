@@ -1,6 +1,6 @@
 # AI_Time_Control
 
-Windows 11 自用强制封锁软件，源码位于 [AI_Cold_Turkey_blocker](AI_Cold_Turkey_blocker)。当前实现到 **v16：后台检测进程复用及鼠标忙碌反馈修复**，新增“软件设置”自启动开关；保留ChatGPT内置网页观看保护，沿用日程、分段额度、白名单和网页例外，只遮挡前台人工观看，保留AI操作能力。规则与统计持续保存，主界面显示实际连接和遮挡执行状态；管理员具有最终恢复权。
+Windows 11 自用强制封锁软件，源码位于 [AI_Cold_Turkey_blocker](AI_Cold_Turkey_blocker)。当前实现到 **v17：原生遮挡可见与置顶检查**，新增“软件设置”自启动开关；保留ChatGPT内置网页观看保护，沿用日程、分段额度、白名单和网页例外，只遮挡前台人工观看，保留AI操作能力。规则与统计持续保存，主界面显示实际连接和遮挡执行状态；管理员具有最终恢复权。
 
 支持应用与网站封锁、每周计划、倒计时和循环、每日或分段额度、网址通配符、例外备注与分组、使用记录及导出。规则收紧可立即生效，放宽按已有等待时间生效；等待期间原规则继续运行。
 
@@ -20,10 +20,11 @@ node --test .\AI_Cold_Turkey_blocker\tests\extension-*.test.mjs
 powershell.exe -NoProfile -File .\AI_Cold_Turkey_blocker\tests\Test-ContinuousUse.ps1
 ```
 
-构建结果在 `AI_Cold_Turkey_blocker/lab/build/host-trial`。上述构建和自测不安装服务、不应用封锁策略；真实安装、浏览器加载与首次封锁由用户另行操作。构建所需的小型无害应用夹具已包含在 `build-fixtures`。需要新安装包时，再运行 `python .\AI_Cold_Turkey_blocker\scripts\package_beta.py --host`，输出独立的v16完整包；已有安装使用对应更新包。
+构建结果在 `AI_Cold_Turkey_blocker/lab/build/host-trial`。上述构建和自测不安装服务、不应用封锁策略；真实安装、浏览器加载与首次封锁由用户另行操作。构建所需的小型无害应用夹具已包含在 `build-fixtures`。需要新安装包时，再运行 `python .\AI_Cold_Turkey_blocker\scripts\package_beta.py --host`，输出独立的v17完整包；已有安装使用对应更新包。
 
 ## 内容与验证
 
+- [实际遮挡修复 v17](AI_Cold_Turkey_blocker/docs/MASK_V17.md)
 - [后台检测修复 v16](AI_Cold_Turkey_blocker/docs/BACKGROUND_V16.md)
 - [开机自启动 v15](AI_Cold_Turkey_blocker/docs/STARTUP_V15.md)
 - [正式观看保护 v14](AI_Cold_Turkey_blocker/docs/MANUAL_VIEWING_V14.md)
