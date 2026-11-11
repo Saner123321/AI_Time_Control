@@ -36,10 +36,12 @@ def main():
         for path in sorted((payload / folder).rglob('*')):
             if path.is_file():
                 assert not path.is_symlink()
+                if path.suffix.lower()=='.pdb':
+                    continue # Debug symbols stay in the private build output.
                 files[path.relative_to(payload).as_posix()] = path
     for name in ('BetaBridge.exe', 'MovedTarget.exe', '专注计划.exe', '管理员恢复工具.exe'):
         files[name] = payload / name
-    files['README.md'] = root / ('docs/MASK_V17.md' if host else 'docs/INTEGRATED_BETA.md')
+    files['README.md'] = root / ('docs/INSTALLATION.md' if host else 'docs/INTEGRATED_BETA.md')
     files['集中测试清单.md'] = root / ('docs/HOST_TEST_CHECKLIST.md' if host else 'docs/BETA_TEST_CHECKLIST.md')
     for project in sorted((root / 'src').iterdir()):
         if not project.is_dir():
@@ -53,6 +55,8 @@ def main():
         if path.is_file():
             files['Sources/browser-extension/beta/' + path.name] = path
     files['Sources/assets/focus.ico'] = root / 'assets/focus.ico'
+    files['Sources/docs/INSTALLATION.md'] = root / 'docs/INSTALLATION.md'
+    files['Sources/docs/HOST_TEST_CHECKLIST.md'] = root / 'docs/HOST_TEST_CHECKLIST.md'
     for name in ('Directory.Build.props', 'NuGet.config', 'global.json'):
         path = root / name
         if path.exists():
@@ -99,6 +103,9 @@ def main():
                 'extension_id': extension_id, 'extension_deployment': 'UNPACKED_SELF_USE' if host else 'UNPACKED_VM_TEST_ONLY',
                 'windows_integration_acceptance': 'NOT_RUN',
                 'host_installation_authorized': host,
+                'distribution': 'FULL_FIRST_INSTALL' if host else 'VM_LAB',
+                'debug_symbols_included': False,
+                'includes_user_data': False,
                 'target_sip_hash': target_hash, 'target_size': target_size,
                 'files': dict(sorted(hashes.items()))}
     if host:
@@ -119,7 +126,7 @@ def main():
         assert set(archive.namelist()) == set(files) | set(contents)
         for name, expected in all_hashes.items():
             assert hashlib.sha256(archive.read(name)).hexdigest() == expected, name
-        assert not any('ui-self-test' in n or n.endswith('.sqlite') for n in archive.namelist())
+        assert not any('ui-self-test' in n or n.endswith(('.sqlite','.pdb')) or n.startswith('state/') for n in archive.namelist())
     final_hash = digest(output)
     with sidecar.open('x', encoding='utf-8') as stream:
         stream.write(final_hash + '  ' + output.name + '\n')

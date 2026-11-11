@@ -1,15 +1,14 @@
 # 在 VMware 来宾里取得只读检测结果
 
+本文是早期 VMware 可行性验证的历史记录。首次安装专注计划请使用[完整安装说明](INSTALLATION.md)，无需安装 Codex 或查找开发者电脑上的文件。
+
 ## 为什么需要这一步
 
 虚拟机已经进入 Windows，但桌面登录不会自动授权 VMware 命令行的 guest operations。
 已实际测试的 `vmrun listSnapshots` 返回“此操作需要输入密码”；不尝试提取 VMware 已保存的密码。
 窗口自动化未成功打开 VMware 快照菜单；因此目前没有快照成功证据。
 
-使用的 computer-use 操作约定（开发环境说明，不是安装依赖）
-明确规定：`Do not run Windows terminal commands via UI automation directly or indirectly.`
-因此我不会在来宾终端里代输命令，也不会用资源管理器等界面间接执行终端命令。
-后面的脚本由用户在来宾里手动运行；不需要提供密码给聊天。
+后面的命令由使用者在自己的来宾 PowerShell 中手动运行，不依赖开发者本机路径或开发工具缓存。不要向聊天、仓库或问题反馈中提交 Windows 或 VMware 密码。
 
 ## 用户操作
 
