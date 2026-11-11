@@ -11,30 +11,38 @@ using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 internal sealed class ViewMask:Form {
+    bool configured;
+    internal int PlaceCalls {get;private set;} internal int ConfigurationWrites {get;private set;}
+    internal int GeometryWrites {get;private set;} internal int ShowTransitions {get;private set;}
+    internal int HideTransitions {get;private set;} internal int PaintCalls {get;private set;}
     [DllImport("user32.dll",SetLastError=true)] static extern bool SetWindowDisplayAffinity(IntPtr window,uint affinity);
     [DllImport("user32.dll",SetLastError=true)] static extern bool GetWindowDisplayAffinity(IntPtr window,out uint affinity);
     [DllImport("user32.dll")] static extern bool SetLayeredWindowAttributes(IntPtr window,uint key,byte alpha,uint flags);
     [DllImport("user32.dll",EntryPoint="GetWindowLongW")] static extern int GetWindowLong(IntPtr window,int index);
     protected override bool ShowWithoutActivation {get{return true;}}
     protected override CreateParams CreateParams {get{var p=base.CreateParams;p.ExStyle|=0x08000000|0x00000020|0x00000080|0x00080000;return p;}}
-    internal ViewMask(){FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;StartPosition=FormStartPosition.Manual;BackColor=Color.FromArgb(20,43,47);DoubleBuffered=true;}
+    internal ViewMask(){FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;StartPosition=FormStartPosition.Manual;BackColor=Color.FromArgb(20,43,47);SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.UserPaint,true);DoubleBuffered=true;}
     internal bool CaptureExcluded {get{uint a;return GetWindowDisplayAffinity(Handle,out a)&&a==0x11;}}
     internal bool InputPassThrough {get{return (GetWindowLong(Handle,-20)&0x08080020)==0x08080020;}}
     internal void Place(Rectangle box){
-        Bounds=box;
-        // Fail before showing if capture exclusion cannot be confirmed.
-        IntPtr window=Handle;SetLayeredWindowAttributes(window,0,255,2);
-        if(!SetWindowDisplayAffinity(window,0x11)||!CaptureExcluded)throw new InvalidOperationException("当前系统没有确认截图排除，已停止遮挡验证。错误码："+Marshal.GetLastWin32Error());
-        if(!Visible)Show();Invalidate();
+        PlaceCalls++;
+        if(Bounds!=box){Bounds=box;GeometryWrites++;}
+        // These writes can reset composition. Configure once per native handle,
+        // rather than resetting display affinity and repainting on every timer tick.
+        IntPtr window=Handle;
+        if(!configured){ConfigurationWrites++;if(!SetLayeredWindowAttributes(window,0,255,2)||!SetWindowDisplayAffinity(window,0x11)||!CaptureExcluded)throw new InvalidOperationException("当前系统没有确认截图排除，已停止遮挡验证。错误码："+Marshal.GetLastWin32Error());configured=true;}
+        if(!Visible){Show();ShowTransitions++;}
     }
+    internal new void Hide(){if(!Visible)return;HideTransitions++;base.Hide();}
+    protected override void OnHandleDestroyed(EventArgs e){configured=false;base.OnHandleDestroyed(e);}
     protected override void WndProc(ref Message m){if(m.Msg==0x0084){m.Result=new IntPtr(-1);return;}base.WndProc(ref m);}
-    protected override void OnPaint(PaintEventArgs e){base.OnPaint(e);var box=ClientRectangle;using(var font=new Font("Microsoft YaHei UI",16))using(var small=new Font("Microsoft YaHei UI",10)){
+    protected override void OnPaint(PaintEventArgs e){PaintCalls++;base.OnPaint(e);var box=ClientRectangle;using(var font=new Font("Microsoft YaHei UI",16))using(var small=new Font("Microsoft YaHei UI",10)){
         TextRenderer.DrawText(e.Graphics,"正在验证：只遮挡观看区域",font,new Rectangle(20,Math.Max(20,box.Height/2-45),box.Width-40,50),Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.WordBreak);
         TextRenderer.DrawText(e.Graphics,"页面没有关闭或断网；切换到其他软件可撤掉遮挡",small,new Rectangle(20,Math.Max(75,box.Height/2+12),box.Width-40,50),Color.WhiteSmoke,TextFormatFlags.HorizontalCenter|TextFormatFlags.WordBreak);
     }}
 }
 internal static class ManualViewLab {
-    internal static JavaScriptSerializer Json(){return new JavaScriptSerializer{MaxJsonLength=131072,RecursionLimit=25};}
+    internal static JavaScriptSerializer Json(){return new JavaScriptSerializer{MaxJsonLength=1048576,RecursionLimit=25};}
     internal static bool CanMask(BrowserProbeResult r,string domain){return r!=null&&r.State=="committed_document_urls_observed"&&!r.Truncated&&r.DurationMs<=1200&&r.Pages.Any(p=>ManualBrowserProbe.Target(p.Url,domain));}
     [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
     [STAThread] static int Main(string[] args){
@@ -60,13 +68,14 @@ internal static class ManualViewLab {
         readonly Label badge=new Label{Width=690,Height=60};
         readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer{Interval=100};
         readonly Stopwatch uptime=Stopwatch.StartNew();readonly List<object> evidence=new List<object>();readonly List<ViewMask> masks=new List<ViewMask>();
+        readonly ManualViewConfirmation confirmation=new ManualViewConfirmation();string maskSignature="";
         ManualViewFixtureServer fixtureServer;
         BrowserProbeResult last;long receivedAt=-10000,nextProbe,maskEnd;bool running,busy,closing;string domain="bilibili.com",signature="",recentDomains="尚无";
         long manualWindow;Rectangle manualRegion,manualOwner;
         readonly Button arm=new Button{Text="开始60秒遮挡验证",Width=210,Height=38};
         internal LabForm(bool offscreen=false){
             this.offscreen=offscreen;
-            Text="专注计划 · 内置浏览器验证 v2";Width=770;Height=Math.Min(790,Screen.PrimaryScreen.WorkingArea.Height-70);StartPosition=FormStartPosition.CenterScreen;Font=new Font("Microsoft YaHei UI",10);
+            Text="专注计划 · 内置浏览器验证 v3";Width=770;Height=Math.Min(790,Screen.PrimaryScreen.WorkingArea.Height-70);StartPosition=FormStartPosition.CenterScreen;Font=new Font("Microsoft YaHei UI",10);
             if(offscreen){StartPosition=FormStartPosition.Manual;Location=new Point(-30000,-30000);ShowInTaskbar=false;}
             using(var stream=Assembly.GetExecutingAssembly().GetManifestResourceStream("AICT.FocusIcon"))if(stream!=null)using(var icon=new Icon(stream))Icon=(Icon)icon.Clone();
             var panel=new FlowLayoutPanel{Dock=DockStyle.Fill,AutoScroll=true,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(22)};Controls.Add(panel);
@@ -84,7 +93,11 @@ internal static class ManualViewLab {
             stop.Click+=(s,e)=>Stop();export.Click+=(s,e)=>Export();timer.Tick+=async(s,e)=>await Tick();timer.Start();
             FormClosing+=(s,e)=>{closing=true;timer.Stop();Stop();foreach(var mask in masks)mask.Dispose();if(fixtureServer!=null)fixtureServer.Dispose();};
         }
-        void Stop(){running=false;maskEnd=0;manualWindow=0;target.ReadOnly=false;foreach(var mask in masks)mask.Hide();badge.Text="已停止，所有验证遮挡已撤掉。";}
+        void Stop(){running=false;maskEnd=0;manualWindow=0;confirmation.Clear();target.ReadOnly=false;foreach(var mask in masks)mask.Hide();TraceMask("stopped");badge.Text="已停止，所有验证遮挡已撤掉。";}
+        void TraceMask(string reason){
+            bool visible=masks.Any(m=>m.Visible);string signature=visible+"|"+reason+"|"+(manualWindow!=0);if(signature==maskSignature)return;maskSignature=signature;
+            if(evidence.Count<1000)evidence.Add(new{eventType="mask_transition",atUtc=DateTimeOffset.UtcNow.ToString("o"),reason,maskVisible=visible,manualRegionTest=manualWindow!=0,configurationWrites=masks.Sum(m=>m.ConfigurationWrites),geometryWrites=masks.Sum(m=>m.GeometryWrites),showTransitions=masks.Sum(m=>m.ShowTransitions),hideTransitions=masks.Sum(m=>m.HideTransitions),paintCalls=masks.Sum(m=>m.PaintCalls)});
+        }
         void SelectManualRegion(){
             Stop();Hide();Rectangle selected=Rectangle.Empty;
             try{using(var pick=new RegionSelectionDialog()){if(pick.ShowDialog()==DialogResult.OK)selected=pick.Selected;}
@@ -97,17 +110,21 @@ internal static class ManualViewLab {
         async Task Tick(){
             if(closing)return;long now=uptime.ElapsedMilliseconds;
             if(maskEnd>0&&now>=maskEnd){maskEnd=0;manualWindow=0;foreach(var mask in masks)mask.Hide();badge.Text="60秒验证已结束，已撤掉遮挡。";}
-            bool fresh=running&&now-receivedAt<=1400&&last!=null&&last.Window==ManualBrowserProbe.GetAncestor(ManualBrowserProbe.GetForegroundWindow(),2).ToInt64();
-            ManualBrowserProbe.Rect rect;if(fresh&&(!ManualBrowserProbe.GetWindowRect(new IntPtr(last.Window),out rect)||rect.Left!=last.OwnerX||rect.Top!=last.OwnerY||rect.Right-rect.Left!=last.OwnerWidth||rect.Bottom-rect.Top!=last.OwnerHeight))fresh=false;
-            bool manualReady=manualWindow!=0&&ManualBrowserProbe.GetAncestor(ManualBrowserProbe.GetForegroundWindow(),2).ToInt64()==manualWindow&&ManualBrowserProbe.GetWindowRect(new IntPtr(manualWindow),out rect)&&rect.Box==manualOwner;
-            if(maskEnd>now&&(manualReady||manualWindow==0&&fresh&&CanMask(last,domain))){
-                var areas=manualReady?new[]{manualRegion}:last.Pages.Where(p=>ManualBrowserProbe.Target(p.Url,domain)).Select(p=>p.Rectangle).ToArray();
+            IntPtr foreground=ManualBrowserProbe.GetAncestor(ManualBrowserProbe.GetForegroundWindow(),2);ManualBrowserProbe.Rect rect;
+            Rectangle owner=ManualBrowserProbe.GetWindowRect(foreground,out rect)?rect.Box:Rectangle.Empty;string reason;
+            var confirmed=confirmation.Select(now,foreground.ToInt64(),owner,out reason);
+            bool manualReady=manualWindow!=0&&foreground.ToInt64()==manualWindow&&owner==manualOwner;
+            if(maskEnd>now&&(manualReady||manualWindow==0&&confirmed!=null&&CanMask(confirmed,domain))){
+                var areas=manualReady?new[]{manualRegion}:confirmed.Pages.Where(p=>ManualBrowserProbe.Target(p.Url,domain)).Select(p=>p.Rectangle).ToArray();
+                reason=manualReady?"manual_ready":last!=null&&last.State=="committed_document_urls_observed"?"confirmed_document":"confirmed_document_short_lease";
                 try{while(masks.Count<areas.Length)masks.Add(new ViewMask());for(int i=0;i<masks.Count;i++){if(i<areas.Length)masks[i].Place(areas[i]);else masks[i].Hide();}badge.Text=(manualReady?"手动框选验证（未确认网址）":"自动识别遮挡验证")+" · 截图排除已读回 · 点击穿透已设置 · 剩余 "+((maskEnd-now+999)/1000)+" 秒";}
-                catch(Exception e){maskEnd=0;foreach(var mask in masks)mask.Hide();badge.Text=e.Message;}
+                catch(Exception e){maskEnd=0;foreach(var mask in masks)mask.Hide();reason="display_configuration_failed";badge.Text=e.Message;}
             }else foreach(var mask in masks)mask.Hide();
+            if(reason!="display_configuration_failed"){if(!running)reason="stopped";else if(maskEnd<=now)reason="not_armed";else if(manualWindow!=0&&!manualReady)reason="manual_owner_not_current";else if(confirmed!=null&&!CanMask(confirmed,domain))reason="current_page_allowed";}
+            TraceMask(reason);
             if(!running||busy||now<nextProbe)return;busy=true;nextProbe=now+600;
             try{
-                var result=await Task.Run(()=>ReadChild());if(closing)return;last=result;receivedAt=uptime.ElapsedMilliseconds;
+                var result=await Task.Run(()=>ReadChild());if(closing)return;last=result;receivedAt=uptime.ElapsedMilliseconds;confirmation.Observe(result,receivedAt);
                 string[] hosts=last.Pages.Select(p=>new Uri(p.Url).IdnHost).Distinct().ToArray();
                 if(last.State=="committed_document_urls_observed")recentDomains=String.Join("、",hosts);
                 status.Text=last.State=="other_application_foreground"?"当前不是 ChatGPT 前台，未计时、未遮挡。\r\n最近一次已识别的域名："+recentDomains:last.State=="committed_document_urls_observed"?"已读取当前可见网页的已提交地址。域名："+String.Join("、",hosts)+"\r\n命中验证域名："+(CanMask(last,domain)?"是":"否")+"；这不是正式规则的封锁结论。":"尚未可靠识别浏览区域："+Reason(last.State)+"\r\n不会用标题或地址栏猜测，也不会直接封锁整个ChatGPT。";
@@ -120,7 +137,7 @@ internal static class ManualViewLab {
                 try{child.Start();var read=child.StandardOutput.ReadToEndAsync();if(!child.WaitForExit(1700)){try{child.Kill();}catch{}return new BrowserProbeResult{State="probe_timeout"};}if(child.ExitCode!=0)return new BrowserProbeResult{State="probe_failed"};if(!read.Wait(200))return new BrowserProbeResult{State="probe_output_incomplete"};return Json().Deserialize<BrowserProbeResult>(read.Result);}catch{return new BrowserProbeResult{State="probe_unavailable"};}
             }
         }
-        void Export(){try{string folder=Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),"reports","manual-view-"+DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ"));Directory.CreateDirectory(folder);File.WriteAllText(Path.Combine(folder,"result.json"),Json().Serialize(new{kind="AICT_MANUAL_VIEWING_LAB_V2",productionIntegrated=false,productionRulesModified=false,chatgptSettingsModified=false,networkOrAppRestrictionsAdded=false,urlsTitlesQueriesOrScreenshotsRecorded=false,humanCaptureAndAiInteractionVerified=false,manualRegionDoesNotConfirmAutomaticDetection=true,observations=evidence}));using(var dialog=new ReportPathDialog(folder)){dialog.ShowDialog(this);if(dialog.Copied)badge.Text="报告文件夹路径已复制，可以直接粘贴到聊天。";}}catch(Exception e){MessageBox.Show(this,e.Message,"导出未完成");}}
+        void Export(){try{string folder=Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),"reports","manual-view-"+DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ"));Directory.CreateDirectory(folder);File.WriteAllText(Path.Combine(folder,"result.json"),Json().Serialize(new{kind="AICT_MANUAL_VIEWING_LAB_V3",productionIntegrated=false,productionRulesModified=false,chatgptSettingsModified=false,networkOrAppRestrictionsAdded=false,urlsTitlesQueriesOrScreenshotsRecorded=false,humanCaptureAndAiInteractionVerified=false,manualRegionDoesNotConfirmAutomaticDetection=true,maskStatistics=masks.Select(m=>new{m.PlaceCalls,m.ConfigurationWrites,m.GeometryWrites,m.ShowTransitions,m.HideTransitions,m.PaintCalls}).ToArray(),observations=evidence}));using(var dialog=new ReportPathDialog(folder)){dialog.ShowDialog(this);if(dialog.Copied)badge.Text="报告文件夹路径已复制，可以直接粘贴到聊天。";}}catch(Exception e){MessageBox.Show(this,e.Message,"导出未完成");}}
     }
     sealed class Fixture:Form {protected override bool ShowWithoutActivation{get{return true;}}internal Fixture(bool nested=false,bool empty=false){StartPosition=FormStartPosition.Manual;Bounds=new Rectangle(-30000,-30000,700,500);ShowInTaskbar=false;var address=new TextBox{Text="https://allowed.invalid/",AccessibleName="Browser address",Bounds=new Rectangle(10,10,650,30)};Controls.Add(address);var document=new DocumentFixture(nested?(empty?"":"app://client/shell"):"https://video.example.invalid/watch"){Bounds=new Rectangle(10,65,650,350)};if(nested)document.Controls.Add(new DocumentFixture{Bounds=new Rectangle(10,10,620,320)});Controls.Add(document);}}
     sealed class DocumentFixture:Panel {internal readonly string CommittedUrl;internal DocumentFixture(string url="https://video.example.invalid/watch"){CommittedUrl=url;}protected override AccessibleObject CreateAccessibilityInstance(){return new DocumentAccessibility(this);}sealed class DocumentAccessibility:ControlAccessibleObject {internal DocumentAccessibility(Control owner):base(owner){}public override AccessibleRole Role{get{return AccessibleRole.Document;}}public override AccessibleStates State{get{return AccessibleStates.None;}}public override string Value{get{return ((DocumentFixture)Owner).CommittedUrl;}set{}}}}
@@ -132,7 +149,12 @@ internal static class ManualViewLab {
         using(var fixture=new Fixture()){
             fixture.Show();Application.DoEvents();var r=ManualBrowserProbe.ReadWindow(fixture.Handle,true);Assert(r.State=="committed_document_urls_observed"&&r.Pages.Count==1,"Own document accessibility probe: "+Json().Serialize(r));Assert(r.Pages[0].Url=="https://video.example.invalid/watch","Address-field text must not replace committed document URL");checks.Add("committed_url_not_address_field");
             Assert(CanMask(r,"example.invalid"),"Matched visible document");checks.Add("verified_document_matches");r.Truncated=true;Assert(!CanMask(r,"example.invalid"),"Truncated must not mask");r.Truncated=false;r.State="ambiguous_browser_rectangles";Assert(!CanMask(r,"example.invalid"),"Ambiguous must not mask");checks.Add("unconfirmed_never_masks");
-            using(var mask=new ViewMask()){mask.Place(new Rectangle(-30000,-29900,500,300));Application.DoEvents();Assert(mask.CaptureExcluded,"Display affinity readback");Assert(mask.InputPassThrough,"Non-activating transparent style");checks.Add("capture_exclusion_readback");checks.Add("input_passthrough_style");Assert(before==ManualBrowserProbe.GetForegroundWindow(),"Fixture must not steal foreground");checks.Add("no_foreground_activation");mask.Hide();}
+            using(var mask=new ViewMask()){
+                var bounds=new Rectangle(-30000,-29900,500,300);mask.Place(bounds);Application.DoEvents();Assert(mask.CaptureExcluded,"Display affinity readback");Assert(mask.InputPassThrough,"Non-activating transparent style");checks.Add("capture_exclusion_readback");checks.Add("input_passthrough_style");Assert(before==ManualBrowserProbe.GetForegroundWindow(),"Fixture must not steal foreground");checks.Add("no_foreground_activation");
+                for(int i=0;i<100;i++)mask.Place(bounds);Application.DoEvents();Assert(mask.ConfigurationWrites==1&&mask.GeometryWrites==1&&mask.ShowTransitions==1&&mask.HideTransitions==0,"Unchanged placement must not reset composition or visibility");checks.Add("unchanged_overlay_no_native_mutation");
+                bounds.Offset(10,0);mask.Place(bounds);Assert(mask.ConfigurationWrites==1&&mask.GeometryWrites==2&&mask.ShowTransitions==1,"Move should preserve capture configuration");checks.Add("overlay_move_preserves_capture_configuration");
+                mask.Hide();mask.Hide();mask.Place(bounds);Assert(mask.CaptureExcluded&&mask.ConfigurationWrites==1&&mask.ShowTransitions==2&&mask.HideTransitions==1,"Hide/show should reuse the same protected native handle");checks.Add("overlay_hide_show_reuses_protection");mask.Hide();
+            }
             fixture.Hide();
         }
         foreach(bool empty in new[]{false,true})using(var nested=new Fixture(true,empty)){
@@ -140,6 +162,14 @@ internal static class ManualViewLab {
             Assert(r.State=="committed_document_urls_observed"&&r.Pages.Count==1&&r.Pages[0].Url=="https://video.example.invalid/watch","Nested committed document: "+Json().Serialize(r));
             Assert(empty?r.EmptyDocumentValues>0:r.NonWebDocumentValues>0,"Redacted document rejection reason missing");checks.Add(empty?"nested_empty_application_document":"nested_non_web_application_document");nested.Hide();
         }
+        var proof=new BrowserProbeResult{State="committed_document_urls_observed",Window=42,OwnerWidth=700,OwnerHeight=500,Pages=new List<VisibleBrowserPage>{new VisibleBrowserPage{Url="https://video.example.invalid/watch",X=10,Y=65,Width=650,Height=350}}};
+        var lease=new ManualViewConfirmation();var owner=new Rectangle(0,0,700,500);string leaseReason;
+        lease.Observe(proof,0);lease.Observe(new BrowserProbeResult{State="probe_timeout"},1400);
+        Assert(lease.Select(2000,42,owner,out leaseReason)!=null&&lease.Select(2501,42,owner,out leaseReason)==null,"Temporary lookup failure must have a bounded, nonrenewing lease");checks.Add("confirmation_lease_bounded_not_poll_renewed");
+        lease.Observe(proof,3000);Assert(lease.Select(3100,43,owner,out leaseReason)==null&&lease.Select(3100,42,new Rectangle(1,0,700,500),out leaseReason)==null,"Foreground and owner geometry must remain exact");checks.Add("confirmation_lease_scope_guard");
+        lease.Observe(new BrowserProbeResult{State="committed_document_urls_observed",Window=42,OwnerWidth=700,OwnerHeight=500,Pages=new List<VisibleBrowserPage>{new VisibleBrowserPage{Url="https://allowed.invalid/",Width=650,Height=350}}},3200);
+        Assert(!CanMask(lease.Select(3201,42,owner,out leaseReason),"example.invalid"),"A newly confirmed allowed page must release the old target immediately");checks.Add("new_allowed_page_replaces_old_target_immediately");
+        lease.Observe(proof,4000);lease.Observe(new BrowserProbeResult{State="committed_document_url_unavailable",HiddenDocuments=1},4100);Assert(lease.Select(4200,42,owner,out leaseReason)==null,"Hidden browser must invalidate lease");lease.Observe(new BrowserProbeResult{State="probe_timeout"},4300);Assert(lease.Select(4400,42,owner,out leaseReason)==null,"No proof must not acquire lease");checks.Add("hidden_or_never_confirmed_page_has_no_lease");
         var ipc=LabForm.ReadChild("--fixture-probe");Assert(ipc.State=="committed_document_urls_observed"&&ipc.Pages.Count==1,"Isolated fixture IPC: "+ipc.State);checks.Add("isolated_worker_fixture_ipc");
         using(var server=new ManualViewFixtureServer())using(var client=new System.Net.WebClient()){
             string html=client.DownloadString(server.Url);Assert(html.Contains("increase")&&html.Contains("counter"),"Loopback fixture");bool refused=false;try{client.DownloadString(server.Url+"/unexpected");}catch(System.Net.WebException){refused=true;}Assert(refused,"Fixture must not serve arbitrary paths");checks.Add("loopback_fixture_static_and_scoped");
