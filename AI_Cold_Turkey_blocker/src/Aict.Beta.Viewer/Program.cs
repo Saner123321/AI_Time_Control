@@ -26,11 +26,13 @@ internal static class ViewerProgram {
     [STAThread] static int Main(string[] args){
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         try{
-            if(args.SequenceEqual(new[]{"--build-info"})){Console.Write(PolicyJson.Serialize(new{hostTrial=BuildMode.HostTrial,revision="manual-view-v14"}));return 0;}
+            if(args.SequenceEqual(new[]{"--build-info"})){Console.Write(PolicyJson.Serialize(new{hostTrial=BuildMode.HostTrial,revision="background-v16"}));return 0;}
             if(args.Length==2&&args[0]=="--self-test"){ViewerSelfTest.Run(args[1]);return 0;}
             if(args.SequenceEqual(new[]{"--security-fixture-wait"})){Thread.Sleep(15000);return 0;}
             if(args.SequenceEqual(new[]{"--fixture-probe"})){Console.Write(ViewerSelfTest.FixtureJson());return 0;}
+            if(args.SequenceEqual(new[]{"--fixture-worker"}))return BrowserProbeWorker.Serve(fixture:true);
             Guard();
+            if(args.SequenceEqual(new[]{"--probe-worker"}))return BrowserProbeWorker.Serve();
             if(args.SequenceEqual(new[]{"--probe"})){
                 var watchdog=new Thread(()=>{Thread.Sleep(1900);Environment.Exit(3);}){IsBackground=true};watchdog.Start();
                 Console.Write(PolicyJson.Serialize(ManualBrowserProbe.ReadForeground()));return 0;
@@ -56,9 +58,10 @@ internal sealed class ViewerContext:ApplicationContext {
     ManualViewingPlan plan;string applied="";ImmutableArray<string> rendered=[];bool completed,uiFault;
     internal ViewerContext(){timer.Tick+=(s,e)=>Tick();timer.Start();_ = Task.Run(Observe);}
     async Task Observe(){
+        using var worker=new BrowserProbeWorker();
         while(!stop.IsCancellationRequested){
             try{
-                var next=await Probe(stop.Token);long now=Environment.TickCount64;ManualViewingSample sample;
+                var next=await worker.Read(stop.Token);long now=Environment.TickCount64;ManualViewingSample sample;
                 lock(gate){raw=next;captured=now;sequence++;var observation=next.State=="other_application_foreground"||next.State=="client_not_visible"?ManualObservation.OutsideClient:next.State=="committed_document_urls_observed"&&!next.Truncated?ManualObservation.Confirmed:ManualObservation.Unavailable;
                     sample=new(observation,observation==ManualObservation.Confirmed?next.Pages.Select(p=>p.Url).ToImmutableArray():[],Math.Max(0,next.DurationMs),Math.Max(0,now-uiAt),applied,rendered,uiFault?"mask_configuration_failed":SafeDiagnostic(next.State));}
                 var response=await ViewerProgram.Call(sample,stop.Token);

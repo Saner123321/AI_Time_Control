@@ -26,7 +26,7 @@ def main():
     payload.relative_to((root / ('lab/build/host-trial' if host else 'lab/build/beta')).resolve())
     ui = json.loads((payload / 'ui-self-test/result.json').read_text('utf-8-sig'))
     assert ui['passed'] and ui['systemWrites'] is False
-    output = root / ('dist/AICT-self-use-full-v15.zip' if host else 'dist/AICT-self-use-beta-v1.zip')
+    output = root / ('dist/AICT-self-use-full-v16.zip' if host else 'dist/AICT-self-use-beta-v1.zip')
     sidecar = output.with_suffix('.zip.sha256')
     if output.exists() or sidecar.exists():
         raise FileExistsError('Frozen release exists; choose a new version')
@@ -39,7 +39,7 @@ def main():
                 files[path.relative_to(payload).as_posix()] = path
     for name in ('BetaBridge.exe', 'MovedTarget.exe', '专注计划.exe', '管理员恢复工具.exe'):
         files[name] = payload / name
-    files['README.md'] = root / ('docs/STARTUP_V15.md' if host else 'docs/INTEGRATED_BETA.md')
+    files['README.md'] = root / ('docs/BACKGROUND_V16.md' if host else 'docs/INTEGRATED_BETA.md')
     files['集中测试清单.md'] = root / ('docs/HOST_TEST_CHECKLIST.md' if host else 'docs/BETA_TEST_CHECKLIST.md')
     for project in sorted((root / 'src').iterdir()):
         if not project.is_dir():
@@ -93,7 +93,7 @@ def main():
     key_hash = hashlib.sha256(base64.b64decode(extension['key'])).hexdigest()[:32]
     extension_id = ''.join(chr(ord('a') + int(x, 16)) for x in key_hash)
     assert extension_id == (payload / 'Extension/extension-id.txt').read_text().strip()
-    manifest = {'kind': 'AICT_INTEGRATED_BETA_V1', 'version': '0.12.0' if host else '0.1.0',
+    manifest = {'kind': 'AICT_INTEGRATED_BETA_V1', 'version': '0.13.0' if host else '0.1.0',
                 'created_utc': datetime.now(timezone.utc).isoformat(), 'vmware_only': not host, 'host_trial':False, 'continuous_use_default':host, 'optional_short_trial':host, 'trial_minutes':None,
                 'normal_entry': '专注计划.exe', 'requires_command_line': False,
                 'extension_id': extension_id, 'extension_deployment': 'UNPACKED_SELF_USE' if host else 'UNPACKED_VM_TEST_ONLY',
@@ -128,7 +128,7 @@ def main():
                'manifest_sha256': all_hashes['MANIFEST.json'],
                'windows_integration_acceptance': 'NOT_RUN'}
     if host:
-        extracted=root/'dist/AICT-self-use-full-v15'
+        extracted=root/'dist/AICT-self-use-full-v16'
         if extracted.exists():raise FileExistsError('Host trial folder already exists')
         with zipfile.ZipFile(output) as archive:archive.extractall(extracted)
         assert all(digest(extracted/name)==expected for name,expected in all_hashes.items())

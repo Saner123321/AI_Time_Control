@@ -30,6 +30,16 @@ internal static class ViewerSelfTest {
             var lease=new ManualViewConfirmation();lease.Observe(sample,0);string reason;var owner=new Rectangle(sample.OwnerX,sample.OwnerY,sample.OwnerWidth,sample.OwnerHeight);Check(lease.Select(2000,sample.Window,owner,out reason)!=null&&lease.Select(2501,sample.Window,owner,out reason)==null,"lease bounds");cases.Add("bounded_foreground_confirmation");fixture.Hide();
         }
         var roundtrip=System.Threading.Tasks.Task.Run(()=>ViewerContext.Probe(System.Threading.CancellationToken.None,"--fixture-probe")).GetAwaiter().GetResult();Check(roundtrip.State=="committed_document_urls_observed"&&roundtrip.Pages.Count==1,"isolated JSON worker roundtrip");cases.Add("isolated_native_worker_json_roundtrip");
+        using(var executable=File.OpenRead(Environment.ProcessPath))using(var image=new System.Reflection.PortableExecutable.PEReader(executable)){Check(image.PEHeaders.PEHeader.Subsystem==System.Reflection.PortableExecutable.Subsystem.WindowsCui,"background executable must not trigger GUI startup feedback");cases.Add("background_console_subsystem_no_gui_startup_feedback");}
+        System.Threading.Tasks.Task.Run(async()=>{
+            using var worker=new BrowserProbeWorker("--fixture-worker");
+            for(int i=0;i<6;i++){var value=await worker.Read(System.Threading.CancellationToken.None);Check(value.State=="committed_document_urls_observed"&&value.Pages.Count==1,"persistent worker response");}
+            Check(worker.Starts==1,"healthy observations must reuse one process");cases.Add("six_observations_reuse_one_worker");
+            int first=worker.WorkerId;var timer=Stopwatch.StartNew();var failed=await worker.Read(System.Threading.CancellationToken.None,"hang");Check(failed.State=="probe_timeout"&&timer.ElapsedMilliseconds<5000&&worker.WorkerId==0,"hung provider timeout");cases.Add("hung_worker_bounded_and_reaped");
+            var recovered=await worker.Read(System.Threading.CancellationToken.None);Check(recovered.State=="committed_document_urls_observed"&&worker.Starts==2&&worker.WorkerId!=first,"timeout recovery");cases.Add("worker_recovers_after_timeout");
+            failed=await worker.Read(System.Threading.CancellationToken.None,"crash");Check(failed.State=="probe_failed"&&worker.WorkerId==0,"crashed worker");recovered=await worker.Read(System.Threading.CancellationToken.None);Check(recovered.State=="committed_document_urls_observed"&&worker.Starts==3,"crash recovery");cases.Add("worker_recovers_after_crash");
+            using var owned=Process.GetProcessById(worker.WorkerId);worker.Dispose();Check(owned.WaitForExit(2000),"worker not disposed");cases.Add("owned_worker_removed_on_shutdown");
+        }).GetAwaiter().GetResult();
         bool admin=new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
         using(var child=new Process{StartInfo=new ProcessStartInfo(Environment.ProcessPath,"--security-fixture-wait"){UseShellExecute=false,CreateNoWindow=true}}){
             child.Start();IntPtr retained=child.Handle;try{
