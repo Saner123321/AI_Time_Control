@@ -1,6 +1,6 @@
 # AI Cold Turkey Blocker
 
-**其他电脑首次安装：** 使用 `AICT-self-use-full-v17.zip` 完整包，完整解压后双击根目录“专注计划.exe”，日常从开始菜单打开。安装目录、账户和安装ID在目标电脑动态确定，不依赖开发者个人路径。见 [完整安装说明](docs/INSTALLATION.md)。下方历次“更新/修复.exe”是面向指定已有安装的历史交付，不能作为通用首次安装包。
+**其他电脑首次安装：** 使用 [AICT-self-use-full-v17.zip](https://github.com/Saner123321/AI_Time_Control/releases/download/v0.14.0-preview.1/AICT-self-use-full-v17.zip) 完整包，完整解压后双击根目录“专注计划.exe”，日常从开始菜单打开。安装目录、账户和安装ID在目标电脑动态确定，不依赖开发者个人路径。见 [完整安装说明](docs/INSTALLATION.md)。下方历次“更新/修复.exe”是面向指定已有安装的历史交付，不能作为通用首次安装包。
 
 **最新更新 v17：实际遮挡与置顶修复。** 已有v16安装使用 `dist/AICT-mask-v17/修复网页遮挡.exe`。修复窗口实际失去置顶、被ChatGPT盖住却仍上报已遮挡的问题。显示后检查原生可见、置顶及位置，只在异常时恢复；未识别不显示执行已确认。保留规则、额度、例外、自启动、AI操作和v16后台进程复用。见 [遮挡执行 v17](docs/MASK_V17.md)。195项核心与19项观看夹具通过，主机效果由用户更新后确认。
 
